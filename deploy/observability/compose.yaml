@@ -1,0 +1,203 @@
+# Observability — profile: observability  (~2.5 GB RAM)
+#
+#   Logs    : app log JSON ra stdout → Filebeat (đọc log container) → Logstash → Elasticsearch → Kibana
+#   Traces  : app (Micrometer Tracing + OTel) → OTLP → APM Server → Elasticsearch → Kibana APM
+#   Metrics : Prometheus tự phát hiện container có label prometheus.io/scrape=true → Grafana
+#
+# Không cấu hình địa chỉ app cố định ở đâu cả → scale replica nào cũng tự thu log/metric.
+# Đây chính là mô hình DaemonSet (Filebeat) + annotation scrape (Prometheus) trên K8s.
+#
+# Filebeat & Prometheus cần đọc Docker socket (chỉ đọc). Trên server production
+# cân nhắc dùng docker-socket-proxy.
+
+x-obs: &obs
+  restart: unless-stopped
+  profiles: [observability]
+
+services:
+
+  elasticsearch:
+    <<: *obs
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-8.13.4}
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"      # dev/lab. Server public: bật security
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  logstash:
+    <<: *obs
+    image: docker.elastic.co/logstash/logstash:${ELASTIC_VERSION:-8.13.4}
+    environment:
+      LS_JAVA_OPTS: -Xms256m -Xmx256m
+    volumes:
+      - ./logstash/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+
+  filebeat:
+    <<: *obs
+    image: docker.elastic.co/beats/filebeat:${ELASTIC_VERSION:-8.13.4}
+    user: root
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat_data:/usr/share/filebeat/data
+    depends_on: [logstash]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  kibana:
+    <<: *obs
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION:-8.13.4}
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  apm-server:
+    <<: *obs
+    image: docker.elastic.co/apm/apm-server:${ELASTIC_VERSION:-8.13.4}
+    command: >
+      apm-server -e --strict.perms=false
+      -E apm-server.host=0.0.0.0:8200
+      -E output.elasticsearch.hosts=["http://elasticsearch:9200"]
+    # Nhận OTLP (HTTP: /v1/traces, gRPC) trên cùng port 8200
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:8200:8200"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  prometheus:
+    <<: *obs
+    image: prom/prometheus:v2.51.2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    user: root   # đọc docker.sock cho docker_sd_configs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+      - ./prometheus/targets:/etc/prometheus/targets:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - prom_data:/prometheus
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  grafana:
+    <<: *obs
+    image: grafana/grafana:10.4.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:3000:3000"
+    depends_on: [prometheus]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Exporters (target lấy từ .env → đúng với cả single/cluster/sentinel) ──
+  redis-exporter:
+    <<: *obs
+    image: oliver006/redis_exporter:v1.58.0
+    environment:
+      REDIS_ADDR: redis://${REDIS_EXPORTER_TARGET:-redis}:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    labels:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9121"
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  kafka-exporter:
+    <<: *obs
+    image: danielqsj/kafka-exporter:v1.7.0
+    # Thử lại khi Kafka chưa sẵn sàng
+    restart: always
+    command: ["--kafka.server=${KAFKA_BOOTSTRAP}"]
+    labels:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9308"
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  node-exporter:
+    <<: *obs
+    image: prom/node-exporter:v1.8.0
+    # Chỉ có ý nghĩa trên server Linux. Docker Desktop (Windows/Mac) sẽ đo VM của Docker.
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    labels:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9100"
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+volumes:
+  es_data:
+  filebeat_data:
+  prom_data:
+  grafana_data:

@@ -1,0 +1,221 @@
+{
+  "realm": "shop",
+  "displayName": "Shop E-Commerce",
+  "enabled": true,
+  "registrationAllowed": true,
+  "loginWithEmailAllowed": true,
+  "resetPasswordAllowed": true,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "ROLE_USER",
+        "description": "Khách hàng",
+        "composite": true,
+        "composites": { "client": { "shop-service": ["product:read", "order:read", "order:write"] } }
+      },
+      {
+        "name": "ROLE_SELLER",
+        "description": "Người bán",
+        "composite": true,
+        "composites": { "client": { "shop-service": ["product:read", "product:write", "inventory:read", "inventory:write"] } }
+      },
+      {
+        "name": "ROLE_INVENTORY_MANAGER",
+        "description": "Quản lý kho",
+        "composite": true,
+        "composites": { "client": { "shop-service": ["inventory:read", "inventory:write"] } }
+      },
+      {
+        "name": "ROLE_SUPPORT",
+        "description": "Chăm sóc khách hàng: xem user, reset mật khẩu",
+        "composite": true,
+        "composites": { "client": { "shop-service": ["user:read", "user:reset-password"] } }
+      },
+      {
+        "name": "ROLE_ADMIN",
+        "description": "Quản trị hệ thống: mọi permission",
+        "composite": true,
+        "composites": {
+          "client": {
+            "shop-service": [
+              "product:read", "product:write",
+              "inventory:read", "inventory:write",
+              "order:read", "order:write",
+              "user:read", "user:create", "user:update", "user:delete",
+              "user:reset-password", "user:assign-role"
+            ]
+          }
+        }
+      },
+      { "name": "ROLE_SERVICE", "description": "Service-to-service (service account)" }
+    ],
+    "client": {
+      "shop-service": [
+        { "name": "product:read", "description": "Xem sản phẩm" },
+        { "name": "product:write", "description": "Tạo/sửa sản phẩm" },
+        { "name": "inventory:read", "description": "Xem tồn kho" },
+        { "name": "inventory:write", "description": "Điều chỉnh tồn kho" },
+        { "name": "order:read", "description": "Xem đơn hàng" },
+        { "name": "order:write", "description": "Tạo đơn hàng" },
+        { "name": "user:read", "description": "Xem, tìm kiếm user" },
+        { "name": "user:create", "description": "Tạo user" },
+        { "name": "user:update", "description": "Sửa thông tin, khóa/mở user" },
+        { "name": "user:delete", "description": "Xóa user" },
+        { "name": "user:reset-password", "description": "Đặt lại mật khẩu user" },
+        { "name": "user:assign-role", "description": "Gán role cho user" }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "shop-app",
+      "name": "Shop Application (SPA / mobile / gateway login)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["${SHOP_APP_REDIRECT_URI}/*"],
+      "webOrigins": ["+"],
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "shop-service-client-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "shop-service",
+            "claim.name": "client_roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience-shop-service",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "shop-service",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "shop-service",
+      "name": "Shop backend services (resource server + service account)",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${SHOP_SERVICE_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-shop-service",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "shop-service",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-shop-service",
+      "enabled": true,
+      "serviceAccountClientId": "shop-service",
+      "realmRoles": ["ROLE_SERVICE"],
+      "clientRoles": {
+        "realm-management": ["view-users", "manage-users", "query-users", "view-realm"]
+      }
+    },
+    {
+      "username": "admin",
+      "email": "admin@shop.local",
+      "firstName": "Shop",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "${SHOP_TEST_USER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["ROLE_ADMIN", "ROLE_USER"]
+    },
+    {
+      "username": "support1",
+      "email": "support1@shop.local",
+      "firstName": "Support",
+      "lastName": "One",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "${SHOP_TEST_USER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["ROLE_SUPPORT", "ROLE_USER"]
+    },
+    {
+      "username": "seller1",
+      "email": "seller1@shop.local",
+      "firstName": "Seller",
+      "lastName": "One",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "${SHOP_TEST_USER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["ROLE_SELLER", "ROLE_USER"]
+    },
+    {
+      "username": "inv.manager",
+      "email": "inv.manager@shop.local",
+      "firstName": "Inventory",
+      "lastName": "Manager",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "${SHOP_TEST_USER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["ROLE_INVENTORY_MANAGER", "ROLE_USER"]
+    },
+    {
+      "username": "user1",
+      "email": "user1@shop.local",
+      "firstName": "John",
+      "lastName": "Doe",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "${SHOP_TEST_USER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["ROLE_USER"]
+    }
+  ]
+}

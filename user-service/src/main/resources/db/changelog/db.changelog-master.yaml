@@ -1,0 +1,5 @@
+# Liquibase master changelog. Mỗi thay đổi schema = 1 file changeset mới, include vào đây.
+# Không sửa changeset đã chạy (Liquibase lưu checksum trong bảng DATABASECHANGELOG).
+databaseChangeLog:
+  - include:
+      file: db/changelog/changes/001-create-user-profile.yaml

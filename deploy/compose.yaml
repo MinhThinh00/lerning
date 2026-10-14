@@ -1,0 +1,28 @@
+# ============================================================
+# Shop Microservice — entry point Docker Compose
+#
+# Một project duy nhất, chia file theo nhóm qua `include`.
+# Chọn thành phần chạy bằng PROFILES (khai báo trong .env → COMPOSE_PROFILES):
+#
+#   kafka-single | kafka-cluster      chọn 1
+#   redis-single | redis-sentinel     chọn 1
+#   observability                     ELK + APM + Prometheus + Grafana
+#   tools                             Kafka UI
+#   apps                              gateway + 6 services (image build bằng Jib)
+#
+# Không có profile → luôn chạy: mysql, keycloak, consul
+#
+# Yêu cầu: Docker Compose >= 2.20 (hỗ trợ `include`)
+# Xem docs/02-DEPLOYMENT.md
+# ============================================================
+
+name: ${COMPOSE_PROJECT_NAME:-shop}
+
+include:
+  - infra/mysql/compose.yaml
+  - infra/consul/compose.yaml
+  - infra/keycloak/compose.yaml
+  - infra/redis/compose.yaml
+  - infra/kafka/compose.yaml
+  - observability/compose.yaml
+  - apps/compose.yaml

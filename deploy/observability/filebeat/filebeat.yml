@@ -1,0 +1,24 @@
+# Filebeat: thu log stdout của container (tương đương DaemonSet trên K8s).
+# Chỉ thu container có label  co.elastic.logs/enabled: "true"  (apps tự gắn label này)
+# → không thu log của chính stack observability.
+
+filebeat.autodiscover:
+  providers:
+    - type: docker
+      hints.enabled: true
+      hints.default_config:
+        enabled: false
+        type: container
+        paths:
+          - /var/lib/docker/containers/${data.container.id}/*.log
+
+processors:
+  - add_docker_metadata: ~
+  - drop_fields:
+      fields: ["agent", "ecs", "input", "log.offset", "stream"]
+      ignore_missing: true
+
+output.logstash:
+  hosts: ["logstash:5044"]
+
+logging.level: warning

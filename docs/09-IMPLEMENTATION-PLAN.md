@@ -1,0 +1,176 @@
+# 09 — Implementation Plan
+
+## Thứ tự & ước lượng
+
+Làm theo **lát cắt dọc**: có luồng đặt hàng end-to-end sớm (dù đơn giản), rồi mới làm sâu từng phần. Plan v1 làm user-service trước và observability cuối, nên phải đến gần cuối mới chạy được luồng chính, và lúc debug hệ phân tán thì chưa có công cụ quan sát.
+
+| Phase | Nội dung | Ước lượng |
+|---|---|---|
+| 0 | Chuẩn bị môi trường, git | 0.5 ngày |
+| 1 | Infra local + Keycloak realm | 0.5–1 ngày |
+| 2 | JHipster JDL + `shop-common` skeleton | 1–1.5 ngày |
+| 3 | `shop-common`: security, envelope, outbox, inbox, kafka, ShedLock | 2 ngày |
+| 4 | product-service | 0.5–1 ngày |
+| 5 | inventory-service: L1 + reservation + consumer | 2 ngày |
+| 6 | order-service + payment + notification → **saga end-to-end** | 2–3 ngày |
+| 7 | Observability end-to-end (log ↔ trace ↔ metric) | 1 ngày |
+| 8 | inventory: L2–L5, Redis, reconcile | 2 ngày |
+| 9 | gateway + user-service | 1–1.5 ngày |
+| 10 | Full Docker + scale + diễn tập sự cố | 1–1.5 ngày |
+| 11 | Benchmark 5 strategy | 1 ngày |
+| 12 | Lên server | 1 ngày |
+| | **Tổng** | **~15–20 ngày công** |
+
+Plan v1 ước tính 25–35 giờ. Con số đó không tính tới test, debug hệ phân tán và triển khai.
+
+Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạt.
+
+---
+
+## Phase 0 — Chuẩn bị
+
+- [ ] Java 21, Maven 3.9, Node 20 LTS (cho JHipster CLI), Docker Desktop (≥ 6 GB RAM), k6
+- [ ] `npm i -g generator-jhipster@8`
+- [ ] `git init`, commit trạng thái hiện tại (docs + deploy)
+- [ ] File hosts: `127.0.0.1 keycloak`
+
+**DoD:** `java -version` = 21, `jhipster --version` = 8.x, `docker compose version` ≥ 2.20.
+
+## Phase 1 — Infra local
+
+- [ ] `cd deploy && cp .env.example .env && docker compose up -d`
+- [ ] Kiểm tra theo 02-DEPLOYMENT §4.4
+
+**DoD:**
+- `docker compose ps`: mysql, consul, keycloak, redis, kafka `healthy`; kafka-init `exited (0)`.
+- Đủ 8 topic + 8 DLT.
+- Token của `user1` có `roles: [ROLE_USER]`, `client_roles: [order:read, order:write]`, và `aud` chứa `shop-service`.
+- User `inventory_svc` **không** thấy `db_order`.
+
+## Phase 2 — Generate
+
+- [ ] Viết `jhipster/shop.jdl` (7 app, 01-ARCHITECTURE §2), generate
+- [ ] Tạo Maven project `shop-common` (jar), `mvn install`
+- [ ] Mỗi service: thêm dependency theo bảng 01-ARCHITECTURE §2; tạo khung package DDD
+- [ ] Mỗi service: `application.yml` default cho IDE (localhost), `application-prod.yml` không chứa địa chỉ
+- [ ] Jib: `-Djib.to.image=shop/<service>`
+
+**DoD:** 7 app start từ IDE, đăng ký Consul (UI `localhost:8500`), `/management/health/readiness` = UP; `./mvnw -Pprod verify jib:dockerBuild` tạo image.
+
+## Phase 3 — `shop-common`
+
+- [ ] `ShopJwtAuthoritiesConverter` + cắm vào `SecurityConfiguration` của từng service
+- [ ] `EventEnvelope`, `Topics`, `EnvelopeCodec`
+- [ ] `OutboxEvent`, `OutboxWriter` (`MANDATORY` tx), `OutboxRelay` (ShedLock), cleanup job, gauge
+- [ ] `ProcessedEvent`, `InboxGuard.tryMarkProcessed`
+- [ ] `KafkaCommonConfig`: String serde, `DefaultErrorHandler` + DLT (partition -1)
+- [ ] Liquibase changelog chung: `outbox_event`, `processed_event`, `shedlock`
+- [ ] Auto-configuration
+
+**DoD (test bằng Testcontainers MySQL + Kafka):**
+- Ghi outbox trong tx bị rollback → không có event nào được publish.
+- Relay chạy ở 2 instance song song → mỗi event chỉ publish 1 lần, đúng thứ tự.
+- Kafka down 30s → event dồn lại, Kafka lên → publish đủ.
+- Gửi cùng một message 2 lần → handler nghiệp vụ chỉ chạy 1 lần.
+- Message JSON hỏng → vào `<topic>.DLT` ngay, không retry.
+
+## Phase 4 — product-service
+
+- [ ] Entity `Product`, `Category`; Liquibase + seed `context="dev"`
+- [ ] `GET /api/products/{id}`, `GET /api/products?ids=` (public), `POST/PUT` (`product:write`)
+
+**DoD:** `seller1` tạo được sản phẩm; `user1` nhận 403; GET không cần token.
+
+## Phase 5 — inventory-service (L1)
+
+- [ ] `inventory`, `inventory_reservation` + seed
+- [ ] `ReservationService`, `ReservationRecorder`, strategy L1
+- [ ] Consumer `order.created` → reserve (L1) → outbox `inventory.reserved/failed`
+- [ ] Consumer `order.paid` (commit), `order.cancelled` (release + tombstone)
+- [ ] REST: GET, adjustments, `reserve?strategy=` (benchmark)
+
+**DoD:**
+- Test: 200 thread reserve đồng thời 1 sản phẩm tồn 100 → đúng 100 thành công, bất biến 04 §2 thỏa.
+- Redeliver `order.created` → không trừ thêm.
+- `order.cancelled` cho đơn `FAILED` → tồn kho không đổi.
+- `order.cancelled` đến trước `order.created` → không giữ hàng.
+
+## Phase 6 — order + payment + notification (saga)
+
+- [ ] Order aggregate (UUID, `userId` String, `@Version`), state machine, xử lý event muộn (07 §3)
+- [ ] `POST /api/orders` lấy giá qua Feign, Idempotency-Key, trả 202
+- [ ] Consumer: `inventory.reserved/failed`, `payment.success/failed`
+- [ ] Job timeout (ShedLock)
+- [ ] payment-service mock; notification-service ghi log
+
+**DoD (chạy cả 7 app từ IDE):**
+- Happy path: đơn → PAID; tồn `reserved → sold`; có notification.
+- Hết hàng: đơn → CANCELLED (`OUT_OF_STOCK`).
+- `PAYMENT_MOCK_SUCCESS_RATE=0` → CANCELLED, tồn kho được trả lại.
+- Tắt payment-service → sau 15 phút đơn CANCELLED (`TIMEOUT`), hàng trả lại. Bật lại → `payment.success` muộn → `refund_required=true`.
+- Không có message nào trong DLT ở các kịch bản trên.
+
+## Phase 7 — Observability
+
+- [ ] `COMPOSE_PROFILES` thêm `observability`; dependencies OTel; histogram HTTP
+- [ ] Data view Kibana, ILM; dashboard import + **Shop Business**
+
+**DoD:**
+- Một đơn hàng hiện thành **một** trace trong Kibana APM, đi qua order → inventory → order → payment → order.
+- Từ `traceId` tìm được log của mọi service liên quan.
+- Grafana hiển thị RPS, P99, consumer lag, outbox pending.
+- Tắt inventory-service → alert `TargetDown` firing.
+
+## Phase 8 — inventory: L2–L5
+
+- [ ] L2 (`lockAll` theo thứ tự, `innodb_lock_wait_timeout`), L3 (retry ngoài tx), L4 (MultiLock, watchdog, unlock sau commit), L5 (Lua + restore)
+- [ ] Redisson starter (cấu hình từ `spring.data.redis.*`), `StringRedisTemplate`
+- [ ] Warmup `SET NX`, reconcile job, gauge drift
+- [ ] Metric `inventory.reserve{strategy,outcome}`
+
+**DoD:**
+- Test đồng thời của Phase 5 pass cho cả 5 strategy.
+- L4: kill Redis giữa lúc đang giữ lock → `@Version` chặn ghi đè (test).
+- L5: xóa key Redis → request vẫn đúng (fallback/nạp lại); làm lệch Redis → reconcile kéo về khớp DB.
+
+## Phase 9 — gateway + user-service
+
+- [ ] Gateway route qua Consul, `oauth2Login` + bearer; (tùy chọn) rate limit Redis
+- [x] user-service: lazy provisioning, admin API qua Keycloak Admin REST API, bù trừ khi tạo user lỗi, RBAC (làm sớm, trước Phase 2)
+
+**DoD:** đặt hàng end-to-end **qua gateway** bằng token `user1`; admin tạo user mới đăng nhập được.
+
+## Phase 10 — Full Docker & scale
+
+- [ ] Build image 7 app; `COMPOSE_PROFILES=kafka-single,redis-single,observability,apps`
+- [ ] `--scale inventory-service=3 --scale order-service=2`
+- [ ] Diễn tập: `docker kill` 1 replica inventory giữa lúc tải; restart Kafka; restart MySQL
+
+**DoD:** sau mỗi diễn tập, bất biến tồn kho thỏa, không đơn nào kẹt ở PENDING quá timeout, outbox về 0, DLT trống.
+
+Lab tùy chọn: `kafka-cluster` + `redis-sentinel`. Kill broker leader hoặc Redis master, quan sát failover và hành vi của L4/L5.
+
+## Phase 11 — Benchmark
+
+- [ ] k6 script (04 §9), endpoint reset (profile `bench`)
+- [ ] Đo 5 strategy × {1, 3 replica}; ghi kết quả + ảnh Grafana vào `docs/benchmark-results.md`
+
+**DoD:** mọi lượt đo đúng (không oversell); có bảng so sánh throughput / P99 / tải DB kèm giải thích.
+
+## Phase 12 — Lên server
+
+- [ ] Server Linux 8 GB+, Docker, firewall (22/80/443)
+- [ ] `.env` server (02-DEPLOYMENT §6.1), reverse proxy TLS, DNS
+- [ ] Push image lên registry (GHCR / Docker Hub) hoặc build trên server
+- [ ] Backup MySQL hằng ngày; ILM Elasticsearch
+
+**DoD:** đặt hàng qua `https://shop.<domain>`, login qua `https://auth.<domain>`; Kibana/Grafana chỉ truy cập được qua SSH tunnel.
+
+---
+
+## Sau dự án: học Kubernetes
+
+1. Cài k3d/kind, deploy **một** service (inventory) bằng manifest viết tay, theo bảng mapping 02-DEPLOYMENT §7.
+2. Dùng `jhipster kubernetes` để sinh manifest cho cả hệ thống rồi so sánh với bản viết tay.
+3. Chuyển infra sang operator/Helm: Strimzi (Kafka), Bitnami Redis, MySQL Operator, Keycloak Operator, ECK (Elastic).
+4. Thêm HPA cho inventory/order theo CPU hoặc consumer lag (KEDA).

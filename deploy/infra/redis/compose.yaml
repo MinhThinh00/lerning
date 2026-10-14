@@ -1,0 +1,133 @@
+# Redis — 2 chế độ, chọn qua profile:
+#
+#   redis-single   : 1 node. Dùng cho dev (app chạy từ IDE) và server đơn.
+#   redis-sentinel : 1 master + 2 replica + 3 sentinel. LAB để học failover.
+#                    Chỉ dùng khi app chạy TRONG Docker network: sentinel trả về
+#                    hostname (redis-master, redis-replica-1...) mà máy host không resolve được.
+#
+# Trên 1 server, sentinel KHÔNG mang lại HA thật (cùng 1 máy). Giá trị là để học
+# hành vi failover của Redisson/Lettuce. Lên K8s: Bitnami Redis chart (sentinel) hoặc managed Redis.
+#
+# App chuyển chế độ chỉ bằng env (xem apps/compose.yaml):
+#   single   → SPRING_DATA_REDIS_HOST
+#   sentinel → SPRING_DATA_REDIS_SENTINEL_MASTER + SPRING_DATA_REDIS_SENTINEL_NODES
+
+x-redis-node: &redis-node
+  image: redis:7.2-alpine
+  restart: unless-stopped
+  environment:
+    REDIS_PASSWORD: ${REDIS_PASSWORD:?set in .env}
+    REDISCLI_AUTH: ${REDIS_PASSWORD}
+  healthcheck:
+    test: ["CMD", "redis-cli", "ping"]
+    interval: 10s
+    timeout: 3s
+    retries: 5
+  deploy:
+    resources:
+      limits:
+        memory: 256M
+
+x-sentinel: &sentinel
+  image: redis:7.2-alpine
+  restart: unless-stopped
+  profiles: [redis-sentinel]
+  # Config được ghi vào volume (sentinel tự rewrite config khi failover)
+  command:
+    - sh
+    - -c
+    - |
+      if [ ! -f /data/sentinel.conf ]; then
+        cat > /data/sentinel.conf <<EOF
+      port 26379
+      sentinel resolve-hostnames yes
+      sentinel announce-hostnames yes
+      sentinel announce-ip $${SENTINEL_HOSTNAME}
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel auth-pass mymaster $${REDIS_PASSWORD}
+      sentinel down-after-milliseconds mymaster 5000
+      sentinel failover-timeout mymaster 30000
+      sentinel parallel-syncs mymaster 1
+      EOF
+      fi
+      exec redis-sentinel /data/sentinel.conf
+  depends_on:
+    redis-master:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        memory: 64M
+
+services:
+
+  # ═══ Profile: redis-single ═══════════════════════════════
+  redis:
+    <<: *redis-node
+    profiles: [redis-single]
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:6379:6379"
+
+  # ═══ Profile: redis-sentinel ═════════════════════════════
+  redis-master:
+    <<: *redis-node
+    profiles: [redis-sentinel]
+    command: >
+      sh -c 'exec redis-server --requirepass "$$REDIS_PASSWORD" --masterauth "$$REDIS_PASSWORD"
+      --appendonly yes --replica-announce-ip redis-master'
+    volumes:
+      - redis_master_data:/data
+
+  redis-replica-1:
+    <<: *redis-node
+    profiles: [redis-sentinel]
+    command: >
+      sh -c 'exec redis-server --requirepass "$$REDIS_PASSWORD" --masterauth "$$REDIS_PASSWORD"
+      --replicaof redis-master 6379 --replica-announce-ip redis-replica-1'
+    depends_on:
+      redis-master:
+        condition: service_healthy
+
+  redis-replica-2:
+    <<: *redis-node
+    profiles: [redis-sentinel]
+    command: >
+      sh -c 'exec redis-server --requirepass "$$REDIS_PASSWORD" --masterauth "$$REDIS_PASSWORD"
+      --replicaof redis-master 6379 --replica-announce-ip redis-replica-2'
+    depends_on:
+      redis-master:
+        condition: service_healthy
+
+  sentinel-1:
+    <<: *sentinel
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SENTINEL_HOSTNAME: sentinel-1
+    volumes:
+      - sentinel_1_data:/data
+
+  sentinel-2:
+    <<: *sentinel
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SENTINEL_HOSTNAME: sentinel-2
+    volumes:
+      - sentinel_2_data:/data
+
+  sentinel-3:
+    <<: *sentinel
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SENTINEL_HOSTNAME: sentinel-3
+    volumes:
+      - sentinel_3_data:/data
+
+volumes:
+  redis_data:
+  redis_master_data:
+  sentinel_1_data:
+  sentinel_2_data:
+  sentinel_3_data:

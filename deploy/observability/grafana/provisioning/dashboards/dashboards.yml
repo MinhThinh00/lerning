@@ -1,0 +1,12 @@
+apiVersion: 1
+
+# Đặt file JSON dashboard vào deploy/observability/grafana/dashboards/
+# (export từ Grafana UI hoặc tải từ grafana.com — xem docs/08-OBSERVABILITY.md)
+providers:
+  - name: shop
+    folder: Shop
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

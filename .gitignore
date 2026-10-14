@@ -1,0 +1,16 @@
+# Secrets
+deploy/.env
+*.env.local
+
+# Prometheus dev target (máy cá nhân)
+deploy/observability/prometheus/targets/*.yml
+
+# Build
+target/
+node_modules/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml

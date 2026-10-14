@@ -1,0 +1,106 @@
+### user-service — thử API bằng IntelliJ HTTP Client (nút ▶ cạnh mỗi request)
+### hoặc VS Code extension "REST Client". Chạy theo thứ tự từ trên xuống.
+### Password test user = SHOP_TEST_USER_PASSWORD trong deploy/.env
+
+@kc = http://keycloak:8180/realms/shop/protocol/openid-connect/token
+@api = http://localhost:8081
+@password = Dev@12345
+
+### Lấy token admin
+# @name adminLogin
+POST {{kc}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id=shop-app&username=admin&password={{password}}
+
+> {% client.global.set("admin", response.body.access_token); %}
+
+### Lấy token support1 (ROLE_SUPPORT: user:read, user:reset-password)
+POST {{kc}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id=shop-app&username=support1&password={{password}}
+
+> {% client.global.set("support", response.body.access_token); %}
+
+### Lấy token user1 (ROLE_USER: không có quyền quản trị)
+POST {{kc}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id=shop-app&username=user1&password={{password}}
+
+> {% client.global.set("user", response.body.access_token); %}
+
+### ── Tài khoản của tôi ──────────────────────────────────────
+
+### Profile của user1 (lần đầu: tự tạo bản ghi user_profile)
+GET {{api}}/api/account
+Authorization: Bearer {{user}}
+
+### Cập nhật profile của user1
+PUT {{api}}/api/account
+Authorization: Bearer {{user}}
+Content-Type: application/json
+
+{ "phoneNumber": "0912345678", "languageKey": "en" }
+
+### ── Quản trị user ────────────────────────────────────────
+
+### user1 tìm user → 403 (không có user:read)
+GET {{api}}/api/admin/users
+Authorization: Bearer {{user}}
+
+### support tìm user → 200
+GET {{api}}/api/admin/users?keyword=shop.local&page=0&size=20
+Authorization: Bearer {{support}}
+
+### admin tạo user → 201 (temporaryPassword=false để đăng nhập thử được bằng direct grant)
+POST {{api}}/api/admin/users
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{
+  "username": "jane",
+  "email": "jane@shop.local",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "phoneNumber": "0987654321",
+  "password": "Jane@12345",
+  "temporaryPassword": false,
+  "roles": ["ROLE_USER"]
+}
+
+> {% client.global.set("janeId", response.body.id); %}
+
+### Chi tiết jane
+GET {{api}}/api/admin/users/{{janeId}}
+Authorization: Bearer {{support}}
+
+### admin sửa jane
+PUT {{api}}/api/admin/users/{{janeId}}
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "email": "jane@shop.local", "firstName": "Janet", "lastName": "Doe", "enabled": true, "languageKey": "en" }
+
+### support reset mật khẩu jane → 204
+POST {{api}}/api/admin/users/{{janeId}}/reset-password
+Authorization: Bearer {{support}}
+Content-Type: application/json
+
+{ "password": "Reset@12345", "temporary": false }
+
+### admin gán role SELLER cho jane → token mới của jane có product:write
+PUT {{api}}/api/admin/users/{{janeId}}/roles
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "roles": ["ROLE_USER", "ROLE_SELLER"] }
+
+### support xóa jane → 403 (không có user:delete)
+DELETE {{api}}/api/admin/users/{{janeId}}
+Authorization: Bearer {{support}}
+
+### admin xóa jane → 204
+DELETE {{api}}/api/admin/users/{{janeId}}
+Authorization: Bearer {{admin}}

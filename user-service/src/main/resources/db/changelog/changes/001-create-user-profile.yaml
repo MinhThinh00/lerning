@@ -1,0 +1,64 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-user-profile
+      author: shop
+      changes:
+        - createTable:
+            tableName: user_profile
+            remarks: Hồ sơ mở rộng. Danh tính (username, email, password, role) do Keycloak quản lý.
+            columns:
+              - column:
+                  name: sub
+                  type: VARCHAR(36)
+                  remarks: Keycloak user id = user id toàn hệ thống
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: username
+                  type: VARCHAR(100)
+                  remarks: Bản sao từ Keycloak (để hiển thị), không unique — Keycloak mới là nơi đảm bảo unique
+                  constraints:
+                    nullable: false
+              - column:
+                  name: email
+                  type: VARCHAR(254)
+              - column:
+                  name: first_name
+                  type: VARCHAR(100)
+              - column:
+                  name: last_name
+                  type: VARCHAR(100)
+              - column:
+                  name: phone_number
+                  type: VARCHAR(20)
+              - column:
+                  name: avatar_url
+                  type: VARCHAR(500)
+              - column:
+                  name: language_key
+                  type: VARCHAR(10)
+                  defaultValue: vi
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: VARCHAR(100)
+              - column:
+                  name: updated_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_by
+                  type: VARCHAR(100)
+        - createIndex:
+            tableName: user_profile
+            indexName: idx_user_profile_username
+            columns:
+              - column:
+                  name: username

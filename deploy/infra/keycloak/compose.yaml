@@ -1,0 +1,63 @@
+# Keycloak 24 — Identity Provider.
+# Realm "shop" được import từ realm/shop-realm.json khi start lần đầu (realm-as-code).
+#
+# Hostname: Keycloak lắng nghe CÙNG port bên trong và bên ngoài container
+# (KEYCLOAK_PORT), và KC_HOSTNAME_URL = KEYCLOAK_URL. Nhờ vậy issuer trong JWT
+# giống nhau dù token lấy từ browser, từ app trên host hay từ container.
+# Local: thêm "127.0.0.1 keycloak" vào file hosts.
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.5
+    restart: unless-stopped
+    command: ["${KEYCLOAK_COMMAND:-start-dev}", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set in .env}
+
+      KC_DB: mysql
+      KC_DB_URL: jdbc:mysql://mysql:3306/db_keycloak?characterEncoding=UTF-8
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${DB_PASSWORD_KEYCLOAK}
+
+      KC_HOSTNAME_URL: ${KEYCLOAK_URL}
+      KC_HOSTNAME_ADMIN_URL: ${KEYCLOAK_URL}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: ${KEYCLOAK_PORT:-8180}
+      # Khi đặt sau reverse proxy (server): proxy gửi X-Forwarded-*
+      KC_PROXY_HEADERS: xforwarded
+
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+
+      # Biến được thay vào realm/shop-realm.json lúc import
+      SHOP_SERVICE_CLIENT_SECRET: ${SHOP_SERVICE_CLIENT_SECRET}
+      SHOP_TEST_USER_PASSWORD: ${SHOP_TEST_USER_PASSWORD}
+      SHOP_APP_REDIRECT_URI: ${SHOP_APP_REDIRECT_URI}
+    volumes:
+      - ./realm:/opt/keycloak/data/import:ro
+    ports:
+      - "${PUBLIC_BIND_ADDR:-0.0.0.0}:${KEYCLOAK_PORT:-8180}:${KEYCLOAK_PORT:-8180}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    labels:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "${KEYCLOAK_PORT:-8180}"
+      prometheus.io/path: "/metrics"
+    # Image Keycloak không có curl → dùng bash /dev/tcp
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/$${KC_HTTP_PORT} &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q UP <&3
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G

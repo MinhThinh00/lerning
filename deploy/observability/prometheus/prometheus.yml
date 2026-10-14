@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: shop
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+scrape_configs:
+
+  # ── Tự phát hiện container có label prometheus.io/scrape=true ──
+  # Giống annotation scrape trên K8s: scale replica → target tự xuất hiện.
+  # Label hỗ trợ: prometheus.io/port (bắt buộc), prometheus.io/path (mặc định /metrics)
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+        filters:
+          - name: label
+            values: ["prometheus.io/scrape=true"]
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_prometheus_io_port]
+        regex: ""
+        action: drop
+      - source_labels: [__meta_docker_network_ip, __meta_docker_container_label_prometheus_io_port]
+        regex: (.+);(.+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_docker_container_label_prometheus_io_path]
+        regex: (.+)
+        target_label: __metrics_path__
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+      - source_labels: [__meta_docker_container_name]
+        regex: /?(.*)
+        target_label: instance
+
+  # ── App chạy từ IDE trên host (dev) ──
+  # Copy targets/dev-host.yml.example → targets/dev-host.yml để bật.
+  - job_name: dev-host
+    metrics_path: /management/prometheus
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/*.yml]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

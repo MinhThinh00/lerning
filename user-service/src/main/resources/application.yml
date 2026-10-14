@@ -1,0 +1,63 @@
+# Cấu hình cho chạy từ IDE (infra trong Docker, app trên host).
+# Mọi giá trị đều ghi đè được bằng env, vd SPRING_DATASOURCE_PASSWORD.
+
+server:
+  port: 8081
+
+spring:
+  application:
+    name: user-service
+
+  datasource:
+    # Port 3306 được publish ra 127.0.0.1 (deploy/infra/mysql/compose.yaml)
+    url: jdbc:mysql://localhost:3306/db_user?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: user_svc
+    password: ${DB_PASSWORD_USER:dev-user-pass}   # = DB_PASSWORD_USER trong deploy/.env
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate      # schema do Liquibase tạo, Hibernate chỉ kiểm tra khớp
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+  security:
+    oauth2:
+      # ── Vai trò 1: resource server — verify token của người gọi API ──
+      resourceserver:
+        jwt:
+          # PHẢI giống hệt claim "iss" trong token (docs/03-SECURITY.md §2)
+          issuer-uri: ${keycloak.url}/realms/${keycloak.realm}
+          # Token phải được cấp CHO shop-service (claim "aud"); token cấp cho app khác bị từ chối
+          audiences: shop-service
+
+      # ── Vai trò 2: OAuth2 client — tự lấy token (client_credentials) để gọi Keycloak Admin API ──
+      client:
+        registration:
+          keycloak-admin:
+            provider: keycloak
+            client-id: shop-service
+            client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:dev-shop-service-secret}   # = SHOP_SERVICE_CLIENT_SECRET
+            authorization-grant-type: client_credentials
+        provider:
+          keycloak:
+            # Ghi token-uri thay vì issuer-uri: không cần gọi Keycloak lúc khởi động
+            token-uri: ${keycloak.url}/realms/${keycloak.realm}/protocol/openid-connect/token
+
+# URL Keycloak dùng chung cho cả 2 vai trò trên
+keycloak:
+  url: ${KEYCLOAK_ADMIN_SERVER_URL:http://keycloak:8180}
+  realm: shop
+  # client PUBLIC, directAccessGrantsEnabled=true (deploy/infra/keycloak/realm/shop-realm.json) -- /api/auth/login dùng client này
+  app-client-id: shop-app
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true

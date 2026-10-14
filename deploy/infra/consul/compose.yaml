@@ -1,0 +1,26 @@
+# Consul — service discovery cho JHipster 8 (thay JHipster Registry đã deprecated).
+# Gateway route theo tên service, scale bao nhiêu replica cũng tự đăng ký.
+# Config KHÔNG để trong Consul KV: mọi config đi qua env var (12-factor) để sau
+# chuyển sang K8s chỉ cần ConfigMap/Secret và tắt Consul (SPRING_CLOUD_CONSUL_ENABLED=false).
+
+services:
+  consul:
+    image: hashicorp/consul:1.18
+    restart: unless-stopped
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -data-dir=/consul/data
+    volumes:
+      - consul_data:/consul/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:8500:8500"
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  consul_data:

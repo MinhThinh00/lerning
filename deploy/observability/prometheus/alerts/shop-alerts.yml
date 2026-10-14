@@ -1,0 +1,69 @@
+# Chưa có Alertmanager: alert xem tại http://localhost:9090/alerts
+# (thêm Alertmanager + Telegram/Slack khi lên server)
+groups:
+  - name: availability
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.service }} ({{ $labels.instance }}) down > 1 phút"
+
+  - name: http
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum by (service) (rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            /
+          sum by (service) (rate(http_server_requests_seconds_count[5m]))
+            > 0.05
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }}: 5xx > 5%"
+
+      - alert: HighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, service) (rate(http_server_requests_seconds_bucket[5m]))) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }}: P99 > 2s"
+
+  - name: messaging
+    rules:
+      - alert: KafkaConsumerLagHigh
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 1000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Lag {{ $labels.consumergroup }}/{{ $labels.topic }} = {{ $value }}"
+
+      - alert: OutboxBacklog
+        # Gauge do shop-common expose (xem docs/05-MESSAGING.md)
+        expr: max by (service) (outbox_pending_events) > 500
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service }}: outbox tồn {{ $value }} event chưa publish"
+
+      - alert: DeadLetterReceived
+        expr: sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".*\\.DLT"}[10m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Có message mới vào {{ $labels.topic }}"
+
+  - name: inventory
+    rules:
+      - alert: InventoryReserveFailureHigh
+        expr: |
+          sum(rate(inventory_reserve_seconds_count{outcome!="success"}[5m]))
+            /
+          sum(rate(inventory_reserve_seconds_count[5m]))
+            > 0.2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Tỉ lệ reserve thất bại > 20%"
