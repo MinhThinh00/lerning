@@ -1,0 +1,138 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-category
+      author: shop
+      changes:
+        - createTable:
+            tableName: category
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: name
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uk_category_name
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: VARCHAR(100)
+              - column:
+                  name: updated_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_by
+                  type: VARCHAR(100)
+
+  - changeSet:
+      id: 001-create-product
+      author: shop
+      changes:
+        - createTable:
+            tableName: product
+            remarks: Nguồn sự thật về giá. Tồn kho KHÔNG nằm ở đây (inventory-service).
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  remarks: productId dạng long dùng trong event (docs/05 §3)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: sku
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uk_product_sku
+              - column:
+                  name: name
+                  type: VARCHAR(200)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: VARCHAR(2000)
+              - column:
+                  name: price
+                  type: DECIMAL(19,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: currency
+                  type: CHAR(3)
+                  defaultValue: VND
+                  constraints:
+                    nullable: false
+              - column:
+                  name: category_id
+                  type: BIGINT
+                  remarks: Tham chiếu theo id (aggregate khác), không map quan hệ JPA
+                  constraints:
+                    foreignKeyName: fk_product_category
+                    references: category(id)
+              - column:
+                  name: seller_id
+                  type: VARCHAR(36)
+                  remarks: Keycloak sub của seller sở hữu. Seller chỉ sửa sản phẩm của mình (docs/10 T9)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: active
+                  # BIT(1), không phải BOOLEAN: Liquibase dịch BOOLEAN thành TINYINT trên MySQL,
+                  # Hibernate 7 map boolean thành BIT → ddl-auto=validate báo sai kiểu
+                  type: BIT(1)
+                  defaultValueBoolean: true
+                  remarks: false = ngừng bán; API public không trả về
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  remarks: Optimistic lock - 2 người sửa cùng lúc thì người sau nhận 409
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: VARCHAR(100)
+              - column:
+                  name: updated_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_by
+                  type: VARCHAR(100)
+        - createIndex:
+            tableName: product
+            indexName: idx_product_seller
+            columns:
+              - column:
+                  name: seller_id
+        - createIndex:
+            tableName: product
+            indexName: idx_product_category_active
+            columns:
+              - column:
+                  name: category_id
+              - column:
+                  name: active

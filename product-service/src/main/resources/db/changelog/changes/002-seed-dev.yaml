@@ -1,0 +1,29 @@
+# Seed cho môi trường dev (context dev). Profile prod chạy context prod nên bỏ qua file này.
+# seller_id = 'seed-seller': sub của seller1 do Keycloak sinh ngẫu nhiên lúc import realm nên không biết trước.
+# Hệ quả: chỉ admin sửa được sản phẩm seed; seller1 sửa được sản phẩm do chính mình tạo.
+# id cố định 1..10 để inventory-service seed tồn kho khớp productId.
+databaseChangeLog:
+  - changeSet:
+      id: 002-seed-dev
+      author: shop
+      context: dev
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO category (id, name, created_at, created_by, updated_at, updated_by) VALUES
+                (1, 'Điện thoại', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (2, 'Laptop',     UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (3, 'Phụ kiện',   UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed');
+
+              INSERT INTO product (id, sku, name, description, price, currency, category_id, seller_id,
+                                   created_at, created_by, updated_at, updated_by) VALUES
+                (1,  'PHONE-001', 'iPhone 16 128GB',          'Điện thoại Apple',        22990000, 'VND', 1, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (2,  'PHONE-002', 'Samsung Galaxy S25',        'Điện thoại Samsung',      19990000, 'VND', 1, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (3,  'PHONE-003', 'Xiaomi 15',                 'Điện thoại Xiaomi',       14990000, 'VND', 1, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (4,  'LAPTOP-001', 'MacBook Air M4 13"',       'Laptop Apple',            27990000, 'VND', 2, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (5,  'LAPTOP-002', 'Dell XPS 14',              'Laptop Dell',             45990000, 'VND', 2, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (6,  'LAPTOP-003', 'Lenovo ThinkPad X1 Carbon','Laptop Lenovo',           39990000, 'VND', 2, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (7,  'ACC-001',   'AirPods Pro 2',             'Tai nghe không dây',       5990000, 'VND', 3, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (8,  'ACC-002',   'Sạc nhanh 65W',             'Củ sạc GaN',                690000, 'VND', 3, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (9,  'ACC-003',   'Cáp USB-C 2m',              'Cáp sạc bện dù',            190000, 'VND', 3, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed'),
+                (10, 'ACC-004',   'Chuột Logitech MX Master 3S','Chuột không dây',         2490000, 'VND', 3, 'seed-seller', UTC_TIMESTAMP(6), 'seed', UTC_TIMESTAMP(6), 'seed');

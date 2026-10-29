@@ -80,10 +80,15 @@ Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạ
 
 ## Phase 4 — product-service
 
-- [ ] Entity `Product`, `Category`; Liquibase + seed `context="dev"`
-- [ ] `GET /api/products/{id}`, `GET /api/products?ids=` (public), `POST/PUT` (`product:write`)
+- [x] Entity `Product`, `Category`; Liquibase + seed `context="dev"`
+- [x] `GET /api/products/{id}`, `GET /api/products?ids=` (public), `POST/PUT` (`product:write`)
+- [x] Data scoping [10 T9](./10-LEARNING-FROM-REFERENCES.md): `seller_id`, `ProductAccessPolicy`, sửa sản phẩm người khác → 404; trang quản lý `GET /api/seller/products`
+- [x] `@Version` + client gửi `version` khi PUT → 409 `VERSION_CONFLICT` thay vì ghi đè
+- [ ] Cache 2 tầng Caffeine → Redis có lock + null sentinel ([10 T4](./10-LEARNING-FROM-REFERENCES.md)): làm sau, cần Redis + k6 để đo DoD
 
 **DoD:** `seller1` tạo được sản phẩm; `user1` nhận 403; GET không cần token.
+
+**Trạng thái (2026-10-29):** xong, DoD kiểm bằng `ProductApiIntegrationTest` (Testcontainers MySQL, 15 test) và chạy thật với token Keycloak của `seller1`/`user1`/`admin`. Sản phẩm seed có `seller_id = 'seed-seller'` (sub của seller1 do Keycloak sinh ngẫu nhiên) → chỉ admin sửa được. Cột boolean dùng `BIT(1)`: Liquibase dịch `BOOLEAN` thành `TINYINT`, Hibernate 7 validate báo sai kiểu.
 
 ## Phase 5 — inventory-service (L1)
 

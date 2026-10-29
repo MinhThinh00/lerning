@@ -25,6 +25,7 @@
     <modules>
         <module>shop-common</module>
         <module>user-service</module>
+        <module>product-service</module>
     </modules>
 
     <properties>

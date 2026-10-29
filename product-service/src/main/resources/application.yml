@@ -1,0 +1,43 @@
+# Cấu hình cho chạy từ IDE (infra trong Docker, app trên host).
+# Mọi giá trị đều ghi đè được bằng env, vd SPRING_DATASOURCE_PASSWORD.
+
+server:
+  port: 8082
+
+spring:
+  application:
+    name: product-service
+
+  datasource:
+    # Port 3306 được publish ra 127.0.0.1 (deploy/infra/mysql/compose.yaml)
+    url: jdbc:mysql://localhost:3306/db_product?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: product_svc
+    password: ${DB_PASSWORD_PRODUCT:dev-product-pass}   # = DB_PASSWORD_PRODUCT trong deploy/.env
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate      # schema do Liquibase tạo, Hibernate chỉ kiểm tra khớp
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    # dev: có seed 10 sản phẩm. application-prod.yml đổi thành prod → không seed.
+    contexts: dev
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # PHẢI giống hệt claim "iss" trong token (docs/03-SECURITY.md §2)
+          issuer-uri: ${KEYCLOAK_URL:http://keycloak:8180}/realms/shop
+          audiences: shop-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true

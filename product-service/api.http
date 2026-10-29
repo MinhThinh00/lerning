@@ -1,0 +1,47 @@
+### product-service — thử API bằng IntelliJ HTTP Client hoặc VS Code "REST Client".
+### Password test user = SHOP_TEST_USER_PASSWORD trong deploy/.env
+
+@kc = http://keycloak:8180/realms/shop/protocol/openid-connect/token
+@api = http://localhost:8082
+@password = Dev@12345
+
+### Public: không cần token
+GET {{api}}/api/products?page=0&size=5
+
+### Public: order-service lấy giá theo danh sách id
+GET {{api}}/api/products?ids=1,2,3
+
+### Lấy token seller1 (ROLE_SELLER: product:write)
+POST {{kc}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password&client_id=shop-app&username=seller1&password={{password}}
+
+> {% client.global.set("seller", response.body.access_token); %}
+
+### seller1 tạo sản phẩm (sellerId = sub của seller1)
+POST {{api}}/api/products
+Authorization: Bearer {{seller}}
+Content-Type: application/json
+
+{ "sku": "CASE-001", "name": "Ốp lưng iPhone 16", "price": 150000, "categoryId": 3 }
+
+> {% client.global.set("productId", response.body.id); %}
+
+### seller1 sửa sản phẩm của mình (gửi version vừa đọc → 409 nếu ai đó đã sửa trước)
+PUT {{api}}/api/products/{{productId}}
+Authorization: Bearer {{seller}}
+Content-Type: application/json
+
+{ "name": "Ốp lưng iPhone 16 Pro", "price": 170000, "categoryId": 3, "active": true, "version": 0 }
+
+### seller1 sửa sản phẩm seed (của người khác) → 404
+PUT {{api}}/api/products/1
+Authorization: Bearer {{seller}}
+Content-Type: application/json
+
+{ "name": "hack", "price": 1 }
+
+### Trang quản lý: chỉ thấy sản phẩm của mình
+GET {{api}}/api/seller/products
+Authorization: Bearer {{seller}}
