@@ -92,11 +92,14 @@ Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạ
 
 ## Phase 5 — inventory-service (L1)
 
-- [ ] `inventory`, `inventory_reservation` + seed
-- [ ] `ReservationService`, `ReservationRecorder`, strategy L1
-- [ ] Consumer `order.created` → reserve (L1) → outbox `inventory.reserved/failed`
-- [ ] Consumer `order.paid` (commit), `order.cancelled` (release + tombstone)
-- [ ] REST: GET, adjustments, `reserve?strategy=` (benchmark)
+- [x] `inventory`, `inventory_reservation` + seed
+- [x] `ReservationService`, `ReservationRecorder`, strategy L1
+- [x] Consumer `order.created` → reserve (L1) → outbox `inventory.reserved/failed`
+- [x] Consumer `order.paid` (commit), `order.cancelled` (release + tombstone)
+- [x] REST: GET, adjustments, `reserve?strategy=` (benchmark)
+- [x] Test đối chứng [10 T2](./10-LEARNING-FROM-REFERENCES.md): `L0ReadThenWriteStrategy` (chỉ trong `src/test`) bị test bắt oversell; L1 xanh 10 lần liên tiếp
+
+**Trạng thái (2026-10-29):** xong, DoD kiểm bằng Testcontainers MySQL + Kafka (`mvn -pl inventory-service test`, 26 test). Chưa chạy thật trên compose vì cần bật `kafka-single`. `INVENTORY_RESERVE_DEFAULT_STRATEGY` chưa cài thì app từ chối khởi động; compose đang đặt `L5` → phải đổi thành `L1` tới khi xong Phase 8. Endpoint `reset` cho benchmark để tới Phase 11.
 
 **DoD:**
 - Test: 200 thread reserve đồng thời 1 sản phẩm tồn 100 → đúng 100 thành công, bất biến 04 §2 thỏa.

@@ -1,0 +1,52 @@
+# Cấu hình cho chạy từ IDE (infra trong Docker, app trên host).
+# Mọi giá trị đều ghi đè được bằng env, vd SPRING_DATASOURCE_PASSWORD.
+
+server:
+  port: 8083
+
+spring:
+  application:
+    name: inventory-service
+
+  datasource:
+    # sessionVariables=innodb_lock_wait_timeout=3: chờ row lock tối đa 3s (L2), MySQL bỏ qua hint lock.timeout của JPA
+    url: jdbc:mysql://localhost:3306/db_inventory?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&sessionVariables=innodb_lock_wait_timeout=3
+    username: inventory_svc
+    password: ${DB_PASSWORD_INVENTORY:dev-inventory-pass}   # = DB_PASSWORD_INVENTORY trong deploy/.env
+    hikari:
+      maximum-pool-size: 20
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate      # schema do Liquibase tạo, Hibernate chỉ kiểm tra khớp
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    contexts: dev             # dev: seed tồn kho cho product 1..10. application-prod.yml đổi thành prod
+
+  # Serializer, acks, ack-mode... đã có mặc định từ shop-common (docs/05 §6). Chỉ cần địa chỉ broker.
+  kafka:
+    bootstrap-servers: localhost:9092   # EXTERNAL listener của deploy/infra/kafka
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_URL:http://keycloak:8180}/realms/shop
+          audiences: shop-service
+
+inventory:
+  reserve:
+    # Strategy cho luồng Kafka (order.created). Phase 5 mới có L1; L2-L5 làm ở Phase 8.
+    default-strategy: ${INVENTORY_RESERVE_DEFAULT_STRATEGY:L1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true

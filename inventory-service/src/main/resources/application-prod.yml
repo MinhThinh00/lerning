@@ -1,0 +1,4 @@
+# Profile prod (Docker / server). Địa chỉ DB, Kafka, Keycloak lấy từ env trong deploy/apps/compose.yaml.
+spring:
+  liquibase:
+    contexts: prod     # không chạy changeset seed (context dev)

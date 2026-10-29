@@ -1,0 +1,20 @@
+# Tồn kho cho 10 sản phẩm seed của product-service (id 1..10, cùng sku). Chỉ context dev.
+databaseChangeLog:
+  - changeSet:
+      id: 002-seed-dev
+      author: shop
+      context: dev
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO inventory (product_id, sku, available, created_at, updated_at) VALUES
+                (1,  'PHONE-001',  100, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (2,  'PHONE-002',  100, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (3,  'PHONE-003',  100, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (4,  'LAPTOP-001',  50, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (5,  'LAPTOP-002',  50, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (6,  'LAPTOP-003',  50, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (7,  'ACC-001',    200, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (8,  'ACC-002',    200, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (9,  'ACC-003',    200, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)),
+                (10, 'ACC-004',     10, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6));

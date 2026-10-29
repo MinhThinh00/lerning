@@ -1,0 +1,45 @@
+# Viết SQL thẳng (MySQL) vì cần CHECK constraint, createTable của Liquibase không diễn đạt được.
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-inventory
+      author: shop
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE inventory (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                product_id  BIGINT      NOT NULL,
+                sku         VARCHAR(50),
+                available   INT         NOT NULL DEFAULT 0,
+                reserved    INT         NOT NULL DEFAULT 0,
+                sold        INT         NOT NULL DEFAULT 0,
+                version     BIGINT      NOT NULL DEFAULT 0,
+                -- BIT(1): Hibernate 7 map boolean thành BIT, BOOLEAN của MySQL là TINYINT → validate lỗi
+                active      BIT(1)      NOT NULL DEFAULT 1,
+                created_at  DATETIME(6) NOT NULL,
+                updated_at  DATETIME(6) NOT NULL,
+                CONSTRAINT uk_inventory_product UNIQUE (product_id),
+                -- Lưới an toàn cuối: dù code có bug, DB không cho tồn kho âm
+                CONSTRAINT chk_inventory_non_negative CHECK (available >= 0 AND reserved >= 0 AND sold >= 0)
+              )
+
+  - changeSet:
+      id: 001-create-inventory-reservation
+      author: shop
+      changes:
+        - sql:
+            sql: |
+              -- 1 dòng / (đơn, sản phẩm): nguồn sự thật cho idempotency, release, commit (docs/04 §2)
+              CREATE TABLE inventory_reservation (
+                id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+                order_id    VARCHAR(36) NOT NULL,
+                product_id  BIGINT      NOT NULL,
+                quantity    INT         NOT NULL,
+                status      VARCHAR(16) NOT NULL,      -- RESERVED | COMMITTED | RELEASED | FAILED
+                strategy    VARCHAR(4),
+                reason      VARCHAR(64),               -- OUT_OF_STOCK, NOT_FOUND, CANCELLED_BEFORE_CREATED...
+                created_at  DATETIME(6) NOT NULL,
+                updated_at  DATETIME(6) NOT NULL,
+                CONSTRAINT uk_reservation_order_product UNIQUE (order_id, product_id),
+                KEY idx_reservation_product_status (product_id, status)
+              )
