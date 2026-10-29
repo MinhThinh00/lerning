@@ -176,16 +176,20 @@ public void onOrderPaid(ConsumerRecord<String, String> record) {
 // application service
 @Transactional
 public void commit(String eventId, OrderPaid evt) {
-    if (!inbox.tryMarkProcessed(eventId, "inventory:order.paid")) return;   // INSERT IGNORE → 0 dòng = trùng
+    if (!inbox.tryMarkProcessed(eventId, "inventory:order.paid")) return;   // INSERT trùng khóa → false
     ... // nghiệp vụ + outbox (nếu có) trong CÙNG transaction với dòng inbox
 }
 ```
 
 Dòng inbox, thay đổi nghiệp vụ và outbox đều nằm trong một transaction: hoặc cả ba cùng commit, hoặc không gì cả.
 
+`tryMarkProcessed` dùng `INSERT` thường và bắt `DuplicateKeyException`, **không** dùng `INSERT IGNORE`: `IGNORE` còn biến cả lỗi khác (vd giá trị dài quá bị cắt) thành warning, nên 2 event khác nhau có thể bị coi là trùng mà không ai biết. Với MySQL, 1 statement lỗi không làm hỏng transaction, nên bắt exception rồi đi tiếp là an toàn.
+
 Job dọn `processed_event` cũ hơn 14 ngày. Khoảng này phải dài hơn mọi khả năng redelivery.
 
 ## 6. Cấu hình Spring Kafka (mặc định trong `shop-common`)
+
+Nạp từ `shop-common-kafka-defaults.properties` qua `ShopKafkaDefaultsEnvironmentPostProcessor`, ưu tiên thấp nhất: service chỉ cần khai báo `bootstrap-servers`, muốn đổi gì thì ghi đè trong `application.yml`. Phần `observation-enabled` để tới Phase 7.
 
 ```yaml
 spring:
@@ -199,6 +203,8 @@ spring:
         enable.idempotence: true
         linger.ms: 5
         delivery.timeout.ms: 30000
+        request.timeout.ms: 10000    # BẮT BUỘC: delivery ≥ linger + request (mặc định 30000 → producer không khởi tạo được)
+        max.block.ms: 10000          # broker chết: send() chờ metadata tối đa 10s (mặc định 60s > lockAtMostFor của relay)
     consumer:
       group-id: ${spring.application.name}
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer

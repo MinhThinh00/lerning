@@ -1,0 +1,156 @@
+# Bảng hạ tầng messaging dùng chung (docs/05-MESSAGING.md §4–5). Mỗi service có DB riêng nên mỗi DB một bộ.
+# Service include file này vào master changelog của mình. KHÔNG sửa changeset đã chạy: thêm file 002-... mới.
+databaseChangeLog:
+  - changeSet:
+      id: shop-common-001-outbox-event
+      author: shop
+      changes:
+        - createTable:
+            tableName: outbox_event
+            remarks: Event chờ publish, ghi cùng transaction với nghiệp vụ. Relay đọc theo thứ tự id.
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  remarks: Thứ tự publish
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: event_id
+                  type: VARCHAR(36)
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uk_outbox_event_event_id
+              - column:
+                  name: aggregate_type
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: aggregate_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: event_type
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: topic
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: message_key
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: payload
+                  type: JSON
+                  remarks: Envelope đầy đủ, gửi nguyên văn làm value
+                  constraints:
+                    nullable: false
+              - column:
+                  name: trace_parent
+                  type: VARCHAR(64)
+                  remarks: W3C traceparent lúc ghi
+              - column:
+                  name: status
+                  type: VARCHAR(16)
+                  defaultValue: PENDING
+                  remarks: PENDING | PUBLISHED. Không có FAILED - lỗi publish chỉ là lỗi tạm thời, thử lại mãi
+                  constraints:
+                    nullable: false
+              - column:
+                  name: attempts
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_error
+                  type: VARCHAR(500)
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: published_at
+                  type: DATETIME(6)
+        - createIndex:
+            tableName: outbox_event
+            indexName: idx_outbox_pending
+            columns:
+              - column:
+                  name: status
+              - column:
+                  name: id
+
+  - changeSet:
+      id: shop-common-001-processed-event
+      author: shop
+      changes:
+        - createTable:
+            tableName: processed_event
+            remarks: Inbox - event đã xử lý, chống trùng khi Kafka giao lại
+            columns:
+              - column:
+                  name: event_id
+                  type: VARCHAR(36)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: consumer
+                  type: VARCHAR(100)
+                  remarks: Handler đã xử lý, vd inventory:order.paid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: processed_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+        - addPrimaryKey:
+            tableName: processed_event
+            columnNames: event_id, consumer
+            constraintName: pk_processed_event
+        - createIndex:
+            tableName: processed_event
+            indexName: idx_processed_event_processed_at
+            columns:
+              - column:
+                  name: processed_at
+
+  - changeSet:
+      id: shop-common-001-shedlock
+      author: shop
+      changes:
+        - createTable:
+            tableName: shedlock
+            remarks: Lock của job @Scheduled khi chạy nhiều replica (ShedLock)
+            columns:
+              - column:
+                  name: name
+                  type: VARCHAR(64)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: lock_until
+                  type: DATETIME(3)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: locked_at
+                  type: DATETIME(3)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: locked_by
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false

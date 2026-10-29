@@ -1,0 +1,4 @@
+# Giống cách service thật dùng: include changelog chung của shop-common.
+databaseChangeLog:
+  - include:
+      file: db/changelog/shop-common/001-messaging.yaml

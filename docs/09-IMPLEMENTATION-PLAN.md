@@ -59,13 +59,17 @@ Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạ
 
 ## Phase 3 — `shop-common`
 
-- [ ] `ShopJwtAuthoritiesConverter` + cắm vào `SecurityConfiguration` của từng service
-- [ ] `EventEnvelope`, `Topics`, `EnvelopeCodec`
-- [ ] `OutboxEvent`, `OutboxWriter` (`MANDATORY` tx), `OutboxRelay` (ShedLock), cleanup job, gauge
-- [ ] `ProcessedEvent`, `InboxGuard.tryMarkProcessed`
-- [ ] `KafkaCommonConfig`: String serde, `DefaultErrorHandler` + DLT (partition -1)
-- [ ] Liquibase changelog chung: `outbox_event`, `processed_event`, `shedlock`
-- [ ] Auto-configuration
+- [x] `ShopJwtAuthoritiesConverter` + cắm vào `SecurityConfiguration` của từng service (bean `JwtAuthenticationConverter` tự nạp; user-service đã dùng)
+- [x] `EventEnvelope`, `Topics`, `EnvelopeCodec`
+- [x] `OutboxEvent`, `OutboxWriter` (`MANDATORY` tx), `OutboxRelay` (ShedLock), cleanup job, gauge
+- [x] `ProcessedEvent`, `InboxGuard.tryMarkProcessed`
+- [x] `KafkaCommonConfig`: String serde, `DefaultErrorHandler` + DLT (partition -1)
+- [x] Liquibase changelog chung: `outbox_event`, `processed_event`, `shedlock`
+- [x] Auto-configuration
+- [x] 2 test đối chứng của [10 T5](./10-LEARNING-FROM-REFERENCES.md): `DualWriteDemoTest`, listener nuốt lỗi (trong `KafkaErrorHandlingTest`)
+- [ ] Luật ArchUnit "chỉ `OutboxRelay` được gọi `KafkaTemplate.send`": dời sang Phase 4–6, khi đã có code service để kiểm
+
+**Trạng thái (2026-10-29):** xong, mọi DoD có test xanh (`mvn -pl shop-common test`, cần Docker). Viết tay, Boot 4 — không qua JHipster. `trace_parent` để `null`, Phase 7 mới điền.
 
 **DoD (test bằng Testcontainers MySQL + Kafka):**
 - Ghi outbox trong tx bị rollback → không có event nào được publish.

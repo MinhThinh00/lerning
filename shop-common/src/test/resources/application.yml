@@ -1,0 +1,21 @@
+# Cấu hình cho integration test messaging (@SpringBootTest). Datasource + Kafka lấy từ Testcontainers
+# trong MessagingIntegrationTest. Các test dùng ApplicationContextRunner không đọc file này.
+spring:
+  application:
+    name: shop-common-it
+  liquibase:
+    change-log: classpath:db/changelog/test-master.yaml
+  kafka:
+    consumer:
+      properties:
+        # Listener thấy topic mới nhanh (mặc định 5 phút)
+        metadata.max.age.ms: 1000
+
+shop:
+  outbox:
+    poll-interval-ms: 100
+
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN

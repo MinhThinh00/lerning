@@ -1,0 +1,2 @@
+# Boot 4: key mới là org.springframework.boot.EnvironmentPostProcessor (bản cũ org.springframework.boot.env.* đã deprecated)
+org.springframework.boot.EnvironmentPostProcessor=com.shop.common.autoconfigure.ShopKafkaDefaultsEnvironmentPostProcessor

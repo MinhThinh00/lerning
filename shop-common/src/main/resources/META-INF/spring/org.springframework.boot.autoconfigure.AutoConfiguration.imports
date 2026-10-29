@@ -1,1 +1,2 @@
 com.shop.common.autoconfigure.ShopCommonAutoConfiguration
+com.shop.common.autoconfigure.ShopMessagingAutoConfiguration
