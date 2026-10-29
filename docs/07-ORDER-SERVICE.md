@@ -86,7 +86,7 @@ Idempotency-Key: <uuid do client sinh>         (tùy chọn, khuyến nghị)
 
 1. Validate: 1–20 item, quantity > 0, không trùng productId.
 2. Nếu `(userId, Idempotency-Key)` đã tồn tại thì trả lại đơn cũ (client retry an toàn).
-3. Lấy giá: Feign `ProductClient.getByIds(ids)` gọi qua Consul (`product-service`), timeout 2s, circuit breaker Resilience4j. **Server tự tính tổng.** Không nhận giá từ client như v1.
+3. Lấy giá: `ProductCatalog.findByIds(ids)` gọi `GET /api/products?ids=` bằng `RestClient` của Spring 7, timeout 2s, lỗi/timeout → 503 `PRODUCT_SERVICE_UNAVAILABLE`. URL lấy từ `order.product-service-url` (Docker: `http://product-service:8082`, DNS của compose tự chia cho các replica). Stack viết tay không có Spring Cloud nên không dùng Feign + Consul; circuit breaker (Resilience4j) để làm sau. Gọi **ngoài** transaction. **Server tự tính tổng.** Không nhận giá từ client như v1.
 4. Một transaction: insert order + items + outbox `order.created`.
 5. Trả `202 Accepted` `{ id, status: "PENDING" }`. Client poll `GET /api/orders/{id}` để theo dõi.
 

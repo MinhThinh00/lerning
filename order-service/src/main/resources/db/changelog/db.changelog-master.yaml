@@ -1,0 +1,8 @@
+# Liquibase master changelog. Mỗi thay đổi schema = 1 file changeset mới, include vào đây.
+# Không sửa changeset đã chạy (Liquibase lưu checksum trong bảng DATABASECHANGELOG).
+databaseChangeLog:
+  # outbox_event, processed_event, shedlock (docs/05 §4-5)
+  - include:
+      file: db/changelog/shop-common/001-messaging.yaml
+  - include:
+      file: db/changelog/changes/001-create-orders.yaml

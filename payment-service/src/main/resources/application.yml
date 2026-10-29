@@ -1,0 +1,47 @@
+# Cấu hình cho chạy từ IDE (infra trong Docker, app trên host).
+
+server:
+  port: 8085
+
+spring:
+  application:
+    name: payment-service
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/db_payment?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: payment_svc
+    password: ${DB_PASSWORD_PAYMENT:dev-payment-pass}   # = DB_PASSWORD_PAYMENT trong deploy/.env
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_URL:http://keycloak:8180}/realms/shop
+          audiences: shop-service
+
+payment:
+  mock:
+    success-rate: ${PAYMENT_MOCK_SUCCESS_RATE:0.9}   # 0 = mọi giao dịch bị từ chối, 1 = luôn thành công
+    min-delay: 100ms                                 # giả lập độ trễ của cổng thanh toán
+    max-delay: 500ms
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true

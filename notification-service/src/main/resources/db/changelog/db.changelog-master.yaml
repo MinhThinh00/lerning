@@ -1,0 +1,7 @@
+# Liquibase master changelog. Không sửa changeset đã chạy, thêm file mới.
+databaseChangeLog:
+  # processed_event (Inbox), shedlock. outbox_event không dùng (service không phát event) nhưng relay cần bảng.
+  - include:
+      file: db/changelog/shop-common/001-messaging.yaml
+  - include:
+      file: db/changelog/changes/001-create-notification-log.yaml

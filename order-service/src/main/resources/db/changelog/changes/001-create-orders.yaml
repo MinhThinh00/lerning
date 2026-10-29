@@ -1,0 +1,47 @@
+# SQL thẳng theo docs/07 §1 (MySQL).
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-orders
+      author: shop
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE orders (
+                id               VARCHAR(36)   PRIMARY KEY,       -- UUID sinh trong app
+                user_id          VARCHAR(36)   NOT NULL,          -- Keycloak sub
+                status           VARCHAR(16)   NOT NULL,
+                total_amount     DECIMAL(19,2) NOT NULL,
+                currency         CHAR(3)       NOT NULL DEFAULT 'VND',
+                shipping_address VARCHAR(500),
+                cancel_reason    VARCHAR(100),
+                -- BIT(1): Hibernate 7 map boolean thành BIT (BOOLEAN của MySQL là TINYINT → validate lỗi)
+                refund_required  BIT(1)        NOT NULL DEFAULT 0,
+                idempotency_key  VARCHAR(64),
+                version          BIGINT        NOT NULL DEFAULT 0, -- consumer + job timeout cùng sửa 1 đơn → optimistic lock
+                created_at       DATETIME(6)   NOT NULL,
+                updated_at       DATETIME(6)   NOT NULL,
+                confirmed_at     DATETIME(6),
+                paid_at          DATETIME(6),
+                cancelled_at     DATETIME(6),
+                KEY idx_orders_user (user_id, created_at),
+                KEY idx_orders_status_updated (status, updated_at),   -- job timeout
+                UNIQUE KEY uk_orders_user_idem (user_id, idempotency_key)
+              )
+
+  - changeSet:
+      id: 001-create-order-item
+      author: shop
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE order_item (
+                id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+                order_id     VARCHAR(36)   NOT NULL,
+                product_id   BIGINT        NOT NULL,
+                sku          VARCHAR(50),
+                product_name VARCHAR(200),
+                unit_price   DECIMAL(19,2) NOT NULL,              -- snapshot giá lúc đặt
+                quantity     INT           NOT NULL,
+                line_total   DECIMAL(19,2) NOT NULL,
+                CONSTRAINT fk_item_order FOREIGN KEY (order_id) REFERENCES orders(id)
+              )

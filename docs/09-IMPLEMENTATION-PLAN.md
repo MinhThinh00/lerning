@@ -109,11 +109,13 @@ Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạ
 
 ## Phase 6 — order + payment + notification (saga)
 
-- [ ] Order aggregate (UUID, `userId` String, `@Version`), state machine, xử lý event muộn (07 §3)
-- [ ] `POST /api/orders` lấy giá qua Feign, Idempotency-Key, trả 202
-- [ ] Consumer: `inventory.reserved/failed`, `payment.success/failed`
-- [ ] Job timeout (ShedLock)
-- [ ] payment-service mock; notification-service ghi log
+- [x] Order aggregate (UUID, `userId` String, `@Version`), state machine, xử lý event muộn (07 §3)
+- [x] `POST /api/orders` lấy giá qua ~~Feign~~ `RestClient` (timeout 2s), Idempotency-Key, trả 202
+- [x] Consumer: `inventory.reserved/failed`, `payment.success/failed`
+- [x] Job timeout (ShedLock)
+- [x] payment-service mock; notification-service ghi log
+- [x] Data scoping đơn hàng ([10 T9](./10-LEARNING-FROM-REFERENCES.md)): `findByIdAndUserId`, đơn người khác → 404
+- [ ] Circuit breaker cho product-service; fake gateway + callback + reconcile ([10 T7](./10-LEARNING-FROM-REFERENCES.md)); email thật qua M2M ([10 T8](./10-LEARNING-FROM-REFERENCES.md)): làm sau
 
 **DoD (chạy cả 7 app từ IDE):**
 - Happy path: đơn → PAID; tồn `reserved → sold`; có notification.
@@ -121,6 +123,8 @@ Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạ
 - `PAYMENT_MOCK_SUCCESS_RATE=0` → CANCELLED, tồn kho được trả lại.
 - Tắt payment-service → sau 15 phút đơn CANCELLED (`TIMEOUT`), hàng trả lại. Bật lại → `payment.success` muộn → `refund_required=true`.
 - Không có message nào trong DLT ở các kịch bản trên.
+
+**Trạng thái (2026-10-29):** xong. Integration test cho từng service (order 12, payment 5, notification 2) và **chạy thật end-to-end** 5 service (product, inventory, order, payment, notification) với Keycloak + MySQL + Kafka của compose: cả 5 kịch bản DoD đạt, 8 topic `.DLT` đều rỗng. Kịch bản timeout chạy với `--order.payment-timeout=40s` thay cho 15 phút. Chưa có gateway (Phase 9) nên gọi thẳng từng service.
 
 ## Phase 7 — Observability
 

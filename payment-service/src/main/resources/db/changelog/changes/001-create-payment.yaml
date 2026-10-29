@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-payment
+      author: shop
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE payment (
+                id         VARCHAR(36)   PRIMARY KEY,
+                order_id   VARCHAR(36)   NOT NULL,
+                amount     DECIMAL(19,2) NOT NULL,
+                currency   CHAR(3)       NOT NULL,
+                status     VARCHAR(16)   NOT NULL,   -- SUCCEEDED | FAILED
+                reason     VARCHAR(100),
+                created_at DATETIME(6)   NOT NULL,
+                -- 1 đơn tối đa 1 lần thu tiền: order.confirmed giao lại cũng không thu 2 lần
+                CONSTRAINT uk_payment_order UNIQUE (order_id)
+              )

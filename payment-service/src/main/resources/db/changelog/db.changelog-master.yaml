@@ -1,0 +1,7 @@
+# Liquibase master changelog. Không sửa changeset đã chạy, thêm file mới.
+databaseChangeLog:
+  # outbox_event, processed_event, shedlock (docs/05 §4-5)
+  - include:
+      file: db/changelog/shop-common/001-messaging.yaml
+  - include:
+      file: db/changelog/changes/001-create-payment.yaml

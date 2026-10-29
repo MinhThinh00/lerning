@@ -1,0 +1,19 @@
+package com.shop.order.config;
+
+import java.time.Duration;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
+
+/**
+ * @param pendingTimeout     PENDING quá lâu (inventory không trả lời) → hủy TIMEOUT
+ * @param paymentTimeout     CONFIRMED quá lâu (payment không trả lời) → hủy TIMEOUT, hàng được nhả
+ * @param productServiceUrl  gốc URL product-service (IDE: localhost:8082, Docker: http://product-service:8082)
+ * @param productTimeout     chờ product-service tối đa; quá thì trả 503 thay vì treo request đặt hàng
+ */
+@ConfigurationProperties("order")
+public record OrderProperties(
+    @DefaultValue("10m") Duration pendingTimeout,
+    @DefaultValue("15m") Duration paymentTimeout,
+    @DefaultValue("http://localhost:8082") String productServiceUrl,
+    @DefaultValue("2s") Duration productTimeout) {
+}

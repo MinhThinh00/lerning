@@ -1,0 +1,50 @@
+# Cấu hình cho chạy từ IDE (infra trong Docker, app trên host).
+# Mọi giá trị đều ghi đè được bằng env, vd SPRING_DATASOURCE_PASSWORD, ORDER_PAYMENT_TIMEOUT.
+
+server:
+  port: 8084
+
+spring:
+  application:
+    name: order-service
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/db_order?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: order_svc
+    password: ${DB_PASSWORD_ORDER:dev-order-pass}   # = DB_PASSWORD_ORDER trong deploy/.env
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+  kafka:
+    bootstrap-servers: localhost:9092   # EXTERNAL listener của deploy/infra/kafka
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_URL:http://keycloak:8180}/realms/shop
+          audiences: shop-service
+
+order:
+  pending-timeout: 10m          # PENDING quá lâu (inventory không trả lời) → hủy TIMEOUT
+  payment-timeout: 15m          # CONFIRMED quá lâu (payment không trả lời) → hủy TIMEOUT
+  product-service-url: http://localhost:8082
+  product-timeout: 2s
+  timeout:
+    check-interval: 60s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
