@@ -290,6 +290,8 @@ public ReserveOutcome reserve(String orderId, List<Item> items) {
 }
 ```
 
+Code thật trả về `{code, index}` thay vì 1 số, để biết **sản phẩm nào** thiếu hàng (`Rejected.productId`).
+
 Cluster mode: script dùng nhiều key, trên Redis Cluster các key phải nằm cùng slot (hash tag, ví dụ `inv:stock:{p}:<id>`). Sentinel và standalone không có ràng buộc này.
 
 ## 5. Đồng bộ Redis ↔ DB
@@ -302,7 +304,7 @@ DB là nguồn sự thật. Redis lệch thì chỉ ảnh hưởng hiệu năng,
 |---|---|
 | Khởi động (`ApplicationReadyEvent`) | `SET inv:stock:<id> <available> NX` cho mọi sản phẩm active. **NX**: không đè counter mà replica khác đang dùng |
 | Key thiếu khi reserve | Nạp lại sản phẩm đó với `SET NX` |
-| Release / adjust / commit | Sau commit (`TransactionSynchronization.afterCommit`): `INCRBY`/`DECRBY` tương ứng |
+| Release / adjust / giữ hàng bằng L1–L4 | Sau commit (`TransactionSynchronization.afterCommit`): cộng/trừ bằng `adjust_if_exists.lua` (key thiếu thì **không** tạo key mới với giá trị = delta). Commit (`order.paid`) không đổi `available` nên không đụng counter |
 | Reconcile job (ShedLock, 5 phút) | So `available` của DB với Redis. Lệch ở 2 lần kiểm tra liên tiếp thì `SET` lại theo DB. Ghi metric `inventory_stock_drift` |
 
 ## 6. Release & commit (consumer)

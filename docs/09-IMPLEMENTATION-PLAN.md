@@ -99,7 +99,7 @@ Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạ
 - [x] REST: GET, adjustments, `reserve?strategy=` (benchmark)
 - [x] Test đối chứng [10 T2](./10-LEARNING-FROM-REFERENCES.md): `L0ReadThenWriteStrategy` (chỉ trong `src/test`) bị test bắt oversell; L1 xanh 10 lần liên tiếp
 
-**Trạng thái (2026-10-29):** xong, DoD kiểm bằng Testcontainers MySQL + Kafka (`mvn -pl inventory-service test`, 26 test). Chưa chạy thật trên compose vì cần bật `kafka-single`. `INVENTORY_RESERVE_DEFAULT_STRATEGY` chưa cài thì app từ chối khởi động; compose đang đặt `L5` → phải đổi thành `L1` tới khi xong Phase 8. Endpoint `reset` cho benchmark để tới Phase 11.
+**Trạng thái (2026-10-29):** xong, DoD kiểm bằng Testcontainers MySQL + Kafka (`mvn -pl inventory-service test`, 26 test). Chưa chạy thật trên compose vì cần bật `kafka-single`. `INVENTORY_RESERVE_DEFAULT_STRATEGY` chưa cài thì app từ chối khởi động; (Phase 8 đã cài đủ L1–L5, mặc định L5.) Endpoint `reset` cho benchmark để tới Phase 11.
 
 **DoD:**
 - Test: 200 thread reserve đồng thời 1 sản phẩm tồn 100 → đúng 100 thành công, bất biến 04 §2 thỏa.
@@ -115,7 +115,7 @@ Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạ
 - [x] Job timeout (ShedLock)
 - [x] payment-service mock; notification-service ghi log
 - [x] Data scoping đơn hàng ([10 T9](./10-LEARNING-FROM-REFERENCES.md)): `findByIdAndUserId`, đơn người khác → 404
-- [ ] Circuit breaker cho product-service; fake gateway + callback + reconcile ([10 T7](./10-LEARNING-FROM-REFERENCES.md)); email thật qua M2M ([10 T8](./10-LEARNING-FROM-REFERENCES.md)): làm sau
+- [x] Circuit breaker cho product-service (Resilience4j core); fake gateway + callback HMAC + reconcile ([10 T7](./10-LEARNING-FROM-REFERENCES.md)); email thật qua M2M + Mailpit ([10 T8](./10-LEARNING-FROM-REFERENCES.md))
 
 **DoD (chạy cả 7 app từ IDE):**
 - Happy path: đơn → PAID; tồn `reserved → sold`; có notification.
@@ -139,15 +139,17 @@ Mỗi phase có **Definition of Done (DoD)**. Chỉ chuyển phase khi DoD đạ
 
 ## Phase 8 — inventory: L2–L5
 
-- [ ] L2 (`lockAll` theo thứ tự, `innodb_lock_wait_timeout`), L3 (retry ngoài tx), L4 (MultiLock, watchdog, unlock sau commit), L5 (Lua + restore)
-- [ ] Redisson starter (cấu hình từ `spring.data.redis.*`), `StringRedisTemplate`
-- [ ] Warmup `SET NX`, reconcile job, gauge drift
-- [ ] Metric `inventory.reserve{strategy,outcome}`
+- [x] L2 (`lockAllActive` theo thứ tự, `innodb_lock_wait_timeout`), L3 (retry ngoài tx, backoff + jitter), L4 (MultiLock, watchdog, unlock sau commit, `@Version` làm fencing), L5 (Lua all-or-nothing + restore, Redis chết → đi thẳng L1)
+- [x] ~~Redisson starter~~ Redisson core (starter chưa theo kịp Boot 4), cấu hình từ `spring.data.redis.*`, `lazyInitialization`; `StringRedisTemplate`
+- [x] Warmup `SET NX`, đồng bộ counter sau commit (release / nhập kho / giữ hàng bằng L1–L4), reconcile job (lệch 2 lượt liên tiếp mới sửa), gauge `inventory.stock.drift`
+- [x] Metric `inventory.reserve{strategy,outcome}`
 
 **DoD:**
 - Test đồng thời của Phase 5 pass cho cả 5 strategy.
 - L4: kill Redis giữa lúc đang giữ lock → `@Version` chặn ghi đè (test).
 - L5: xóa key Redis → request vẫn đúng (fallback/nạp lại); làm lệch Redis → reconcile kéo về khớp DB.
+
+**Trạng thái (2026-10-29):** xong. `mvn -pl inventory-service test`: 36 test, gồm race 200 thread × 5 strategy (cả 5: 100 thành công / 100 OUT_OF_STOCK, không bán vượt), test L4 mất lock (FLUSHALL giữa chừng → `@Version` chặn, CONFLICT), L5 mất key / counter thấp hơn hoặc cao hơn DB / reconcile. Chạy thật end-to-end với Redis compose (L5 mặc định): DB `available` và counter Redis khớp nhau sau happy path, hết hàng, 10 đơn đồng thời, thanh toán bị từ chối. Redis host port đổi được bằng `REDIS_HOST_PORT` (6379 hay bị chiếm).
 
 ## Phase 9 — gateway + user-service
 

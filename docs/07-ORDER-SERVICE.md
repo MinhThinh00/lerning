@@ -86,7 +86,7 @@ Idempotency-Key: <uuid do client sinh>         (tùy chọn, khuyến nghị)
 
 1. Validate: 1–20 item, quantity > 0, không trùng productId.
 2. Nếu `(userId, Idempotency-Key)` đã tồn tại thì trả lại đơn cũ (client retry an toàn).
-3. Lấy giá: `ProductCatalog.findByIds(ids)` gọi `GET /api/products?ids=` bằng `RestClient` của Spring 7, timeout 2s, lỗi/timeout → 503 `PRODUCT_SERVICE_UNAVAILABLE`. URL lấy từ `order.product-service-url` (Docker: `http://product-service:8082`, DNS của compose tự chia cho các replica). Stack viết tay không có Spring Cloud nên không dùng Feign + Consul; circuit breaker (Resilience4j) để làm sau. Gọi **ngoài** transaction. **Server tự tính tổng.** Không nhận giá từ client như v1.
+3. Lấy giá: `ProductCatalog.findByIds(ids)` gọi `GET /api/products?ids=` bằng `RestClient` của Spring 7, timeout 2s, lỗi/timeout → 503 `PRODUCT_SERVICE_UNAVAILABLE`. URL lấy từ `order.product-service-url` (Docker: `http://product-service:8082`, DNS của compose tự chia cho các replica). Stack viết tay không có Spring Cloud nên không dùng Feign + Consul. Bọc thêm **circuit breaker** (Resilience4j core, `order.product-breaker.*`): ≥ 50% lỗi/chậm trong 20 lời gọi gần nhất → OPEN, trả 503 ngay không gọi mạng trong 10s, rồi HALF_OPEN thử lại. Lỗi 4xx không tính. Metric `resilience4j_circuitbreaker_state{name="product-service"}`. Gọi **ngoài** transaction. **Server tự tính tổng.** Không nhận giá từ client như v1.
 4. Một transaction: insert order + items + outbox `order.created`.
 5. Trả `202 Accepted` `{ id, status: "PENDING" }`. Client poll `GET /api/orders/{id}` để theo dõi.
 
@@ -128,26 +128,21 @@ Mỗi đơn hủy trong một transaction riêng (`cancel("TIMEOUT")` + outbox).
 - Tạo sản phẩm **không** tự tạo tồn kho. Admin nhập kho qua `POST /api/inventory/{productId}/adjustments`, giữ hai service độc lập.
 - Seed data: Liquibase `context="dev"`, 10 sản phẩm.
 
-## 9. payment-service (mock)
+## 9. payment-service (cổng giả có callback, docs/10 T7)
 
-- Consume `order.confirmed` → tạo `payment` (unique `order_id` → idempotent) → mock: thành công với xác suất `PAYMENT_MOCK_SUCCESS_RATE`, delay ngẫu nhiên 100–500 ms.
-- Phát `payment.success` / `payment.failed` qua outbox.
-- `GET /api/admin/payments?orderId=` (ADMIN).
+- `order.confirmed` → ghi `payment(PENDING)` (unique `order_id`) **trước** → gọi cổng `POST /charges` **ngoài** transaction. Cổng lỗi → Kafka retry, lần giao lại thấy PENDING thì gửi lại (cổng idempotent theo paymentId).
+- Fake gateway (`/fake-gateway/**`, `payment.fake-gateway.*`) chạy trong chính service nhưng chỉ nói chuyện qua HTTP: trả 202, xử lý sau 0.1–3s, callback 1..3 lần (có lúc đồng thời), `no-callback-rate` 10% không gọi. `PAYMENT_MOCK_SUCCESS_RATE` vẫn dùng được.
+- `POST /api/payments/callback` (không token): HMAC-SHA256 trên byte thô (`X-Signature`, `MessageDigest.isEqual`) → 401; kiểm số tiền → 409; `UPDATE ... WHERE status='PENDING'` + outbox `payment.success/failed` cùng transaction. Callback trùng → 200 `ALREADY_COMPLETED`.
+- `PaymentReconcileJob` (ShedLock `payment.reconcile`): PENDING quá 2 phút → `GET /charges/{id}` → chốt bằng cùng code với callback; cổng không biết giao dịch → FAILED `NOT_FOUND_AT_GATEWAY`.
+- Metric `payment.completion{source=callback|reconcile, result}`. `GET /api/admin/payments?orderId=` (ADMIN).
 
 ```sql
-CREATE TABLE payment (
-  id         VARCHAR(36)   PRIMARY KEY,
-  order_id   VARCHAR(36)   NOT NULL UNIQUE,
-  amount     DECIMAL(19,2) NOT NULL,
-  currency   CHAR(3)       NOT NULL,
-  status     VARCHAR(16)   NOT NULL,   -- SUCCEEDED | FAILED
-  reason     VARCHAR(100),
-  created_at DATETIME(6)   NOT NULL
-);
+-- 001 + 002: status PENDING | SUCCEEDED | FAILED, provider_txn_id UNIQUE, version, updated_at
 ```
 
 ## 10. notification-service (mock)
 
-- Consume `order.paid`, `order.cancelled` (Inbox) → ghi `notification_log` → "gửi" (log INFO).
-- Không publish event, nên không cần outbox.
-- Muốn gửi email thật: thêm Mailpit vào profile `tools` và cấu hình `spring.mail.*` qua env.
+- Consume `order.paid`, `order.cancelled`: 1 transaction (Inbox + `notification_log` PENDING) → sau commit `NotificationDispatcher` gửi email.
+- Email khách lấy bằng **token máy** (client_credentials của `shop-service`, ROLE_SERVICE) từ `GET user-service /api/internal/users/{sub}/contact` (docs/10 T8). Token user, kể cả ADMIN → 403.
+- `notification_log` là hộp thư đi: PENDING → SENDING (claim bằng UPDATE có điều kiện) → SENT | FAILED. Lỗi tạm thời (user-service/SMTP chết) → PENDING, `NotificationRetryJob` (ShedLock) thử lại, tối đa 5 lần. User không tồn tại → FAILED ngay. At-least-once: chết giữa lúc gửi và lúc ghi SENT có thể gửi trùng 1 lần.
+- SMTP `spring.mail.*`; dev dùng Mailpit (profile `tools`, UI http://localhost:8025).
