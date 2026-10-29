@@ -57,6 +57,16 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Circuit breaker quanh lời gọi product-service (dùng programmatic, không annotation) -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-circuitbreaker</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-micrometer</artifactId>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

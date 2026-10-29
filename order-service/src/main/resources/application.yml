@@ -36,6 +36,11 @@ order:
   payment-timeout: 15m          # CONFIRMED quá lâu (payment không trả lời) → hủy TIMEOUT
   product-service-url: http://localhost:8082
   product-timeout: 2s
+  product-breaker:              # circuit breaker quanh product-service (OrderProperties.ProductBreaker)
+    failure-rate-threshold: 50  # ≥ 50% lời gọi gần đây lỗi → OPEN
+    sliding-window-size: 20
+    minimum-calls: 10
+    wait-in-open: 10s           # OPEN bao lâu rồi mới cho thử lại (HALF_OPEN)
   timeout:
     check-interval: 60s
 
