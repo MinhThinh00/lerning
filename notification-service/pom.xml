@@ -57,6 +57,18 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Gửi email (SMTP; dev: Mailpit) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+        <!-- OAuth2 client: tự lấy token client_credentials để gọi user-service (docs/10 T8) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-oauth2-client</artifactId>
+        </dependency>
+
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

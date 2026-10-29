@@ -1,0 +1,22 @@
+# Gửi email thật: notification_log thành "hộp thư đi" (mail outbox) có trạng thái gửi.
+#   PENDING → SENDING (đã được 1 worker nhận) → SENT | FAILED; lỗi tạm thời → về PENDING, job thử lại.
+databaseChangeLog:
+  - changeSet:
+      id: 002-notification-delivery
+      author: shop
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE notification_log
+                ADD COLUMN status     VARCHAR(16)  NOT NULL DEFAULT 'SENT',  -- dòng cũ (bản mock) coi như đã gửi
+                ADD COLUMN recipient  VARCHAR(254) NULL,
+                ADD COLUMN attempts   INT          NOT NULL DEFAULT 0,
+                ADD COLUMN last_error VARCHAR(500) NULL,
+                ADD COLUMN claimed_at DATETIME(6)  NULL,
+                ADD COLUMN sent_at    DATETIME(6)  NULL,
+                ADD COLUMN updated_at DATETIME(6)  NULL,
+                ADD KEY idx_notification_status_updated (status, updated_at)  -- retry job
+        - sql:
+            sql: UPDATE notification_log SET updated_at = created_at
+        - sql:
+            sql: ALTER TABLE notification_log MODIFY updated_at DATETIME(6) NOT NULL, ALTER COLUMN status DROP DEFAULT

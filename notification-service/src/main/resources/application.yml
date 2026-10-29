@@ -29,6 +29,34 @@ spring:
         jwt:
           issuer-uri: ${KEYCLOAK_URL:http://keycloak:8180}/realms/shop
           audiences: shop-service
+      # OAuth2 client: notification tự xin token client_credentials để gọi user-service (docs/10 T8)
+      client:
+        registration:
+          shop-service:
+            provider: keycloak
+            client-id: shop-service
+            client-secret: ${SHOP_SERVICE_CLIENT_SECRET:dev-shop-service-secret}
+            authorization-grant-type: client_credentials
+        provider:
+          keycloak:
+            token-uri: ${KEYCLOAK_URL:http://keycloak:8180}/realms/shop/protocol/openid-connect/token
+
+  # SMTP. Dev: Mailpit (docker compose --profile tools up -d mailpit), UI http://localhost:8025
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+    properties:
+      mail.smtp.connectiontimeout: 2000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+
+notification:
+  user-service-url: ${USER_SERVICE_URL:http://localhost:8081}
+  mail-from: Shop <no-reply@shop.local>
+  max-attempts: 5          # quá số lần thử → FAILED
+  retry-after: 30s         # lỗi tạm thời → retry job thử lại sau ít nhất bấy nhiêu
+  retry-interval: 30s
+  claim-timeout: 5m        # SENDING quá lâu (worker chết giữa chừng) → cho nhận lại
 
 management:
   endpoints:

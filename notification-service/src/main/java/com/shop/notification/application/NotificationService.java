@@ -5,23 +5,19 @@ import com.shop.notification.domain.NotificationLog;
 import com.shop.notification.domain.NotificationLog.Type;
 import com.shop.notification.domain.NotificationLogRepository;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Báo khách khi đơn PAID / CANCELLED (docs/07 §10). Tiêu thụ thẳng domain event, không có topic notification riêng.
- * Inbox chống gửi trùng: Kafka giao lại order.paid thì khách không nhận 2 thông báo.
  *
- * Bản mock "gửi" = log INFO + ghi notification_log, nằm trong cùng transaction với dòng inbox.
- * Khi gửi thật (email/SMS) thì việc gửi là side effect ra ngoài, không rollback được: khi đó phải tách bước gửi
- * ra sau commit và chấp nhận at-least-once phía nhà cung cấp (docs/10 T8).
+ * Bước 1 (ở đây, 1 transaction): Inbox + ghi notification_log PENDING. Kafka giao lại order.paid → Inbox chặn
+ * → không tạo thông báo thứ hai.
+ * Bước 2 (sau commit): {@link NotificationDispatcher} gửi email. Tách ra vì gửi email không rollback được.
  */
 @Service
 public class NotificationService {
-
-    private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
     private final NotificationLogRepository logs;
     private final InboxGuard inbox;
@@ -31,15 +27,17 @@ public class NotificationService {
         this.inbox = inbox;
     }
 
+    /** @return id thông báo cần gửi; empty nếu event đã xử lý rồi */
     @Transactional
-    public void orderPaid(String eventId, String orderId, String userId, String totalAmount, String currency) {
-        notify(eventId, "notification:order.paid", orderId, userId, Type.ORDER_PAID,
+    public Optional<Long> orderPaid(String eventId, String orderId, String userId, String totalAmount, String currency) {
+        return record(eventId, "notification:order.paid", orderId, userId, Type.ORDER_PAID,
             "Đơn hàng " + orderId + " đã thanh toán thành công (" + totalAmount + " " + currency + ")");
     }
 
+    /** @return id thông báo cần gửi; empty nếu event đã xử lý rồi */
     @Transactional
-    public void orderCancelled(String eventId, String orderId, String userId, String reason) {
-        notify(eventId, "notification:order.cancelled", orderId, userId, Type.ORDER_CANCELLED,
+    public Optional<Long> orderCancelled(String eventId, String orderId, String userId, String reason) {
+        return record(eventId, "notification:order.cancelled", orderId, userId, Type.ORDER_CANCELLED,
             "Đơn hàng " + orderId + " đã bị hủy (" + reason + ")");
     }
 
@@ -48,11 +46,10 @@ public class NotificationService {
         return logs.findByOrderIdOrderByIdAsc(orderId);
     }
 
-    private void notify(String eventId, String consumer, String orderId, String userId, Type type, String message) {
+    private Optional<Long> record(String eventId, String consumer, String orderId, String userId, Type type, String message) {
         if (!inbox.tryMarkProcessed(eventId, consumer)) {
-            return;
+            return Optional.empty();
         }
-        logs.save(new NotificationLog(eventId, orderId, userId, type, message));
-        log.info("Sending notification to user {}: {}", userId, message);
+        return Optional.of(logs.save(new NotificationLog(eventId, orderId, userId, type, message)).getId());
     }
 }

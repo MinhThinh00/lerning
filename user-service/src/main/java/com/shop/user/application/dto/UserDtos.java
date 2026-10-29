@@ -37,4 +37,8 @@ public final class UserDtos {
     public record UpdateUserCommand(String email, String firstName, String lastName, boolean enabled,
                                     String phoneNumber, String avatarUrl, String languageKey) {
     }
+
+    /** Thông tin liên hệ cho service khác (notification gửi email): chỉ field cần thiết, không lộ role/trạng thái. */
+    public record UserContact(String id, String email, String firstName, String languageKey) {
+    }
 }

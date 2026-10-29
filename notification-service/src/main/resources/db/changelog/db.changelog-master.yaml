@@ -5,3 +5,5 @@ databaseChangeLog:
       file: db/changelog/shop-common/001-messaging.yaml
   - include:
       file: db/changelog/changes/001-create-notification-log.yaml
+  - include:
+      file: db/changelog/changes/002-notification-delivery.yaml

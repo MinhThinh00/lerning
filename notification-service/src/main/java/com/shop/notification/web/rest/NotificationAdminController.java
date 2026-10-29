@@ -27,11 +27,12 @@ class NotificationAdminController {
         return notifications.byOrder(orderId).stream().map(NotificationView::from).toList();
     }
 
-    record NotificationView(Long id, String orderId, String userId, String type, String message, Instant createdAt) {
+    record NotificationView(Long id, String orderId, String userId, String type, String message, String status,
+                            String recipient, int attempts, String lastError, Instant createdAt, Instant sentAt) {
 
         static NotificationView from(NotificationLog n) {
             return new NotificationView(n.getId(), n.getOrderId(), n.getUserId(), n.getType().name(), n.getMessage(),
-                n.getCreatedAt());
+                n.getStatus().name(), n.getRecipient(), n.getAttempts(), n.getLastError(), n.getCreatedAt(), n.getSentAt());
         }
     }
 }

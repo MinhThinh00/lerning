@@ -1,0 +1,27 @@
+# Mailpit: SMTP server giả + web UI xem mail (docs/07 §10). Profile tools.
+#
+#   SMTP : localhost:1025   (app từ IDE)  |  mailpit:1025 (app trong Docker)
+#   UI   : http://localhost:8025          (xem mail notification-service đã gửi)
+#
+# Không gửi ra Internet: mọi mail bị giữ lại trong Mailpit. Production thay bằng SMTP thật / SES / SendGrid
+# qua SPRING_MAIL_HOST, SPRING_MAIL_PORT, SPRING_MAIL_USERNAME, SPRING_MAIL_PASSWORD.
+
+services:
+  mailpit:
+    image: axllent/mailpit:v1.21.8
+    restart: unless-stopped
+    profiles: [tools]
+    environment:
+      MP_MAX_MESSAGES: 5000
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:1025:1025"
+      - "${BIND_ADDR:-127.0.0.1}:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 64M
