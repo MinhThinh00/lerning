@@ -2,107 +2,131 @@ package com.shop.payment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 
-import com.shop.common.messaging.EnvelopeCodec;
 import com.shop.common.messaging.EventEnvelope;
 import com.shop.common.messaging.Topics;
 import com.shop.common.messaging.it.KafkaTestSupport;
 import com.shop.common.messaging.it.SharedContainers;
-import com.shop.payment.application.port.PaymentGateway;
-import com.shop.payment.application.port.PaymentGateway.ChargeResult;
+import com.shop.payment.domain.model.Payment;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.testcontainers.mysql.MySQLContainer;
+import org.springframework.test.annotation.DirtiesContext;
 
-/** order.confirmed → thu tiền (cổng giả lập bằng mock) → payment.success / payment.failed; không thu 2 lần. */
-@SpringBootTest
-class PaymentIntegrationTest {
+/**
+ * docs/10 T7 với fake gateway THẬT (qua HTTP): order.confirmed → PENDING → cổng giả callback 1..3 lần,
+ * có lúc đồng thời → đúng 1 payment.success. Cộng các ca callback: 10 callback đồng thời, sai chữ ký, lệch tiền.
+ */
+@SpringBootTest(webEnvironment = WebEnvironment.DEFINED_PORT)
+@DirtiesContext   // 2 class cùng group consumer order.confirmed: context cũ còn sống sẽ giành message
+class PaymentIntegrationTest extends PaymentTestSupport {
 
-    static final MySQLContainer MYSQL = SharedContainers.mysql("db_payment");
-    static final Duration TIMEOUT = Duration.ofSeconds(30);
+    static final int PORT = freePort();
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        SharedContainers.register(registry, MYSQL);
+        registerCommon(registry, PORT);
+        registry.add("payment.fake-gateway.success-rate", () -> "1.0");
+        registry.add("payment.fake-gateway.no-callback-rate", () -> "0");
+        registry.add("payment.fake-gateway.min-delay", () -> "50ms");
+        registry.add("payment.fake-gateway.max-delay", () -> "200ms");
+        registry.add("payment.fake-gateway.max-callbacks", () -> "3");
     }
 
-    @MockitoBean
-    JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    PaymentGateway gateway;
-
-    @Autowired
-    KafkaTemplate<String, String> kafka;
-
-    @Autowired
-    EnvelopeCodec codec;
-
-    @Autowired
-    JdbcClient jdbc;
+    @Override
+    int port() {
+        return PORT;
+    }
 
     @Test
-    void successfulChargePublishesPaymentSuccessAndRedeliveryDoesNotChargeTwice() throws Exception {
+    void sagaThroughFakeGateway_publishesExactlyOneSuccess_evenWithDuplicateCallbacksAndRedelivery() throws Exception {
         String orderId = UUID.randomUUID().toString();
-        given(gateway.charge(eq(orderId), any(), any())).willReturn(new ChargeResult(true, null));
         String confirmed = orderConfirmed(orderId, "22990000.00");
 
         kafka.send(Topics.ORDER_CONFIRMED, orderId, confirmed).get();
-        EventEnvelope success = codec.decode(awaitEvent(Topics.PAYMENT_SUCCESS, orderId));
-        assertThat(success.payload().get("amount").asString()).isEqualTo("22990000.00");
-        assertThat(success.payload().get("paymentId").asString()).isNotBlank();
-        assertThat(paymentStatus(orderId)).isEqualTo("SUCCEEDED");
+        kafka.send(Topics.ORDER_CONFIRMED, orderId, confirmed).get();   // Kafka giao lại → gửi lại cổng, cổng idempotent
 
-        kafka.send(Topics.ORDER_CONFIRMED, orderId, confirmed).get();                      // Kafka giao lại
-        kafka.send(Topics.ORDER_CONFIRMED, orderId, orderConfirmed(orderId, "22990000.00")).get();   // order gửi lại
-        Thread.sleep(3_000);
-        verify(gateway, times(1)).charge(eq(orderId), any(), any());
-        assertThat(KafkaTestSupport.readFor(bootstrap(), Topics.PAYMENT_SUCCESS, Duration.ofSeconds(2)))
-            .filteredOn(r -> orderId.equals(r.key())).hasSize(1);
+        await().atMost(Duration.ofSeconds(30)).until(() -> "SUCCEEDED".equals(statusByOrder(orderId)));
+        Thread.sleep(2_000);   // đợi hết các callback trùng của cổng giả
+        assertThat(outboxEvents(orderId)).isEqualTo(1);
+
+        EventEnvelope success = codec.decode(KafkaTestSupport.readUntil(bootstrap(), Topics.PAYMENT_SUCCESS,
+                Duration.ofSeconds(30), rs -> rs.stream().anyMatch(r -> orderId.equals(r.key())))
+            .stream().filter(r -> orderId.equals(r.key())).findFirst().orElseThrow().value());
+        assertThat(success.payload().get("amount").asString()).isEqualTo("22990000.00");
+        assertThat(jdbc.sql("SELECT provider_txn_id FROM payment WHERE order_id = ?").param(orderId)
+            .query(String.class).single()).startsWith("FGW-");
     }
 
     @Test
-    void declinedChargePublishesPaymentFailed() throws Exception {
-        String orderId = UUID.randomUUID().toString();
-        given(gateway.charge(eq(orderId), any(), any())).willReturn(new ChargeResult(false, "DECLINED"));
+    void tenConcurrentCallbacks_exactlyOneEvent() throws Exception {
+        Payment p = pendingPayment("100000.00");
+        byte[] body = callbackBody(p, "SUCCEEDED", "100000.00");
+        String sig = sign(body);
 
-        kafka.send(Topics.ORDER_CONFIRMED, orderId, orderConfirmed(orderId, "100000.00")).get();
+        ExecutorService pool = Executors.newFixedThreadPool(10);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Integer>> codes = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            codes.add(pool.submit(() -> {
+                start.await();
+                return postCallback(body, sig);
+            }));
+        }
+        start.countDown();
+        for (Future<Integer> f : codes) {
+            assertThat(f.get()).as("duplicates also get 200 so the gateway stops retrying").isEqualTo(200);
+        }
+        pool.shutdown();
 
-        EventEnvelope failed = codec.decode(awaitEvent(Topics.PAYMENT_FAILED, orderId));
-        assertThat(failed.payload().get("reason").asString()).isEqualTo("DECLINED");
-        assertThat(paymentStatus(orderId)).isEqualTo("FAILED");
+        assertThat(status(p.getId())).isEqualTo("SUCCEEDED");
+        assertThat(outboxEvents(p.getOrderId())).isEqualTo(1);
     }
 
-    private String orderConfirmed(String orderId, String amount) {
-        return codec.encode(new EventEnvelope(UUID.randomUUID().toString(), "OrderConfirmed", 1, Instant.now(),
-            "order-service", "Order", orderId, codec.mapper().valueToTree(
-                Map.of("orderId", orderId, "userId", "user-1", "totalAmount", amount, "currency", "VND"))));
+    @Test
+    void invalidSignature_401_andNothingChanges() {
+        Payment p = pendingPayment("100000.00");
+        byte[] body = callbackBody(p, "SUCCEEDED", "100000.00");
+
+        assertThat(postCallback(body, "00".repeat(32))).isEqualTo(401);
+        assertThat(postCallback(body, null)).isEqualTo(401);
+        byte[] tampered = callbackBody(p, "SUCCEEDED", "1.00");
+        assertThat(postCallback(tampered, sign(body))).as("signature of another body").isEqualTo(401);
+
+        assertThat(status(p.getId())).isEqualTo("PENDING");
+        assertThat(outboxEvents(p.getOrderId())).isZero();
     }
 
-    private String paymentStatus(String orderId) {
-        return jdbc.sql("SELECT status FROM payment WHERE order_id = ?").param(orderId).query(String.class).single();
+    @Test
+    void failedCallback_publishesPaymentFailedWithReason() {
+        Payment p = pendingPayment("100000.00");
+        byte[] body = callbackBody(p, "FAILED", "100000.00");
+
+        assertThat(postCallback(body, sign(body))).isEqualTo(200);
+
+        assertThat(status(p.getId())).isEqualTo("FAILED");
+        assertThat(outboxTopic(p.getOrderId())).isEqualTo(Topics.PAYMENT_FAILED);
+        assertThat(jdbc.sql("SELECT reason FROM payment WHERE id = ?").param(p.getId()).query(String.class).single())
+            .isEqualTo("INSUFFICIENT_FUNDS");
     }
 
-    private String awaitEvent(String topic, String orderId) {
-        return KafkaTestSupport.readUntil(bootstrap(), topic, TIMEOUT, rs -> rs.stream().anyMatch(r -> orderId.equals(r.key())))
-            .stream().filter(r -> orderId.equals(r.key())).findFirst()
-            .orElseThrow(() -> new AssertionError("no " + topic + " for " + orderId)).value();
+    @Test
+    void amountMismatch_409_andNotCompleted() {
+        Payment p = pendingPayment("100000.00");
+        byte[] body = callbackBody(p, "SUCCEEDED", "1.00");
+
+        assertThat(postCallback(body, sign(body))).isEqualTo(409);
+        assertThat(status(p.getId())).isEqualTo("PENDING");
     }
 
     private static String bootstrap() {

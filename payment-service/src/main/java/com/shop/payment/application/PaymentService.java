@@ -1,13 +1,10 @@
 package com.shop.payment.application;
 
-import com.shop.common.messaging.Topics;
-import com.shop.common.messaging.outbox.OutboxWriter;
 import com.shop.common.web.error.NotFoundException;
-import com.shop.payment.application.PaymentEvents.PaymentFailed;
-import com.shop.payment.application.PaymentEvents.PaymentSucceeded;
 import com.shop.payment.application.port.PaymentGateway;
-import com.shop.payment.application.port.PaymentGateway.ChargeResult;
+import com.shop.payment.application.port.PaymentGateway.ChargeRequest;
 import com.shop.payment.domain.model.Payment;
+import com.shop.payment.domain.model.Payment.Status;
 import com.shop.payment.domain.repository.PaymentRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -19,51 +16,48 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Bước thu tiền của saga: order.confirmed → thu tiền → payment.success / payment.failed.
+ * Bước thu tiền của saga, nửa đầu: order.confirmed → payment PENDING → gửi yêu cầu thu sang cổng.
+ * Nửa sau (kết quả) về qua callback hoặc reconcile → {@link PaymentCompletion}.
  *
- * Gọi cổng thanh toán NGOÀI transaction: không giữ connection DB trong lúc chờ mạng (docs/10 checklist).
- * Chống thu tiền 2 lần: đã có payment cho đơn → bỏ qua; 2 consumer chạy song song → unique order_id chặn bên sau.
- * Với cổng thật, idempotency phải đẩy sang cả phía cổng (gửi orderId làm idempotency key): xem docs/10 T7.
+ * - Ghi PENDING TRƯỚC khi gọi cổng: nếu chết ngay sau khi gọi, reconcile vẫn biết có giao dịch để hỏi lại.
+ *   Gọi cổng trước rồi mới ghi thì chết ở giữa = khách bị trừ tiền mà hệ thống không hề biết.
+ * - Gọi cổng NGOÀI transaction: không giữ connection DB trong lúc chờ mạng.
+ * - Cổng lỗi → để exception thoát ra → Kafka retry; lần giao lại thấy PENDING và gửi lại. Gửi lại an toàn vì
+ *   cổng idempotent theo paymentId. Hết retry (DLT) thì reconcile thấy cổng không biết giao dịch → FAILED.
  */
 @Service
 public class PaymentService {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
-    private static final String AGGREGATE = "Payment";
 
     private final PaymentRepository payments;
     private final PaymentGateway gateway;
-    private final OutboxWriter outbox;
     private final TransactionTemplate tx;
 
-    public PaymentService(PaymentRepository payments, PaymentGateway gateway, OutboxWriter outbox, TransactionTemplate tx) {
+    public PaymentService(PaymentRepository payments, PaymentGateway gateway, TransactionTemplate tx) {
         this.payments = payments;
         this.gateway = gateway;
-        this.outbox = outbox;
         this.tx = tx;
     }
 
     public void onOrderConfirmed(String orderId, BigDecimal amount, String currency) {
-        if (payments.findByOrderId(orderId).isPresent()) {
-            log.info("Order {} already charged, skip redelivered order.confirmed", orderId);
+        Payment payment = payments.findByOrderId(orderId).orElse(null);
+        if (payment == null) {
+            try {
+                payment = tx.execute(s -> payments.saveAndFlush(Payment.pending(orderId, amount, currency)));
+            } catch (DataIntegrityViolationException duplicate) {
+                log.info("Payment for order {} created concurrently by another consumer, skip", orderId);
+                return;
+            }
+        } else if (payment.getStatus() != Status.PENDING) {
+            log.info("Order {} already {} (payment {}), skip redelivered order.confirmed",
+                orderId, payment.getStatus(), payment.getId());
             return;
+        } else {
+            log.info("Payment {} of order {} still PENDING, re-submitting (gateway is idempotent by paymentId)",
+                payment.getId(), orderId);
         }
-        ChargeResult result = gateway.charge(orderId, amount, currency);
-        try {
-            tx.executeWithoutResult(s -> {
-                if (result.success()) {
-                    Payment p = payments.saveAndFlush(Payment.succeeded(orderId, amount, currency));
-                    outbox.write(Topics.PAYMENT_SUCCESS, AGGREGATE, p.getId(), orderId, "PaymentSucceeded",
-                        new PaymentSucceeded(orderId, p.getId(), amount.toPlainString(), currency));
-                } else {
-                    Payment p = payments.saveAndFlush(Payment.failed(orderId, amount, currency, result.reason()));
-                    outbox.write(Topics.PAYMENT_FAILED, AGGREGATE, p.getId(), orderId, "PaymentFailed",
-                        new PaymentFailed(orderId, result.reason()));
-                }
-            });
-        } catch (DataIntegrityViolationException duplicate) {
-            log.info("Order {} charged concurrently by another consumer, skip", orderId);
-        }
+        gateway.submit(new ChargeRequest(payment.getId(), orderId, payment.getAmount(), payment.getCurrency()));
     }
 
     @Transactional(readOnly = true)
@@ -73,11 +67,11 @@ public class PaymentService {
     }
 
     public record PaymentView(String id, String orderId, BigDecimal amount, String currency, String status,
-                              String reason, Instant createdAt) {
+                              String providerTxnId, String reason, Instant createdAt, Instant updatedAt) {
 
         static PaymentView from(Payment p) {
             return new PaymentView(p.getId(), p.getOrderId(), p.getAmount(), p.getCurrency(), p.getStatus().name(),
-                p.getReason(), p.getCreatedAt());
+                p.getProviderTxnId(), p.getReason(), p.getCreatedAt(), p.getUpdatedAt());
         }
     }
 }

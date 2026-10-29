@@ -31,10 +31,21 @@ spring:
           audiences: shop-service
 
 payment:
-  mock:
-    success-rate: ${PAYMENT_MOCK_SUCCESS_RATE:0.9}   # 0 = mọi giao dịch bị từ chối, 1 = luôn thành công
-    min-delay: 100ms                                 # giả lập độ trễ của cổng thanh toán
-    max-delay: 500ms
+  gateway:                                            # cổng thanh toán (thật hay giả đều gọi qua HTTP)
+    base-url: ${PAYMENT_GATEWAY_BASE_URL:http://localhost:8085/fake-gateway}
+    callback-url: ${PAYMENT_GATEWAY_CALLBACK_URL:http://localhost:8085/api/payments/callback}
+    hmac-secret: ${PAYMENT_GATEWAY_HMAC_SECRET:dev-payment-hmac-secret}   # ký callback, dùng chung với cổng
+    timeout: 2s
+  fake-gateway:                                       # cổng GIẢ trong chính service này (docs/10 T7)
+    enabled: true
+    success-rate: ${PAYMENT_MOCK_SUCCESS_RATE:0.9}    # 0 = mọi giao dịch bị từ chối, 1 = luôn thành công
+    min-delay: 100ms                                  # xử lý xong sau min..max rồi mới callback
+    max-delay: 3s
+    no-callback-rate: 0.1                             # 10% giao dịch mất callback → reconcile chốt
+    max-callbacks: 3                                  # callback 1..3 lần, có lúc đồng thời
+  reconcile:
+    interval: 30s
+    pending-after: 2m                                 # PENDING lâu hơn thế mới hỏi cổng
 
 management:
   endpoints:

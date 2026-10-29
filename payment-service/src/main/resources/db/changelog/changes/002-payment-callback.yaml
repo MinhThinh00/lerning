@@ -1,0 +1,20 @@
+# docs/10 T7: thu tiền bất đồng bộ qua cổng có callback (IPN).
+# payment tạo ở trạng thái PENDING khi nhận order.confirmed; callback / reconcile chuyển sang SUCCEEDED | FAILED
+# bằng UPDATE ... WHERE status = 'PENDING' (chỉ 1 bên thắng).
+databaseChangeLog:
+  - changeSet:
+      id: 002-payment-callback
+      author: shop
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE payment
+                ADD COLUMN provider_txn_id VARCHAR(64) NULL AFTER status,   -- mã giao dịch phía cổng
+                ADD COLUMN version         BIGINT      NOT NULL DEFAULT 0,
+                ADD COLUMN updated_at      DATETIME(6) NULL,
+                ADD CONSTRAINT uk_payment_provider_txn UNIQUE (provider_txn_id),
+                ADD KEY idx_payment_status_created (status, created_at);    -- reconcile job tìm PENDING cũ
+        - sql:
+            sql: UPDATE payment SET updated_at = created_at
+        - sql:
+            sql: ALTER TABLE payment MODIFY updated_at DATETIME(6) NOT NULL
