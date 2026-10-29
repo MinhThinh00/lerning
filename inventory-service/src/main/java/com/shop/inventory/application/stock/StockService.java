@@ -2,6 +2,7 @@ package com.shop.inventory.application.stock;
 
 import com.shop.common.web.error.BusinessException;
 import com.shop.common.web.error.NotFoundException;
+import com.shop.inventory.application.reservation.StockCounterSync;
 import com.shop.inventory.domain.model.Inventory;
 import com.shop.inventory.domain.repository.InventoryRepository;
 import java.time.Instant;
@@ -24,9 +25,11 @@ public class StockService {
     private static final Logger log = LoggerFactory.getLogger(StockService.class);
 
     private final InventoryRepository inventory;
+    private final StockCounterSync counterSync;
 
-    public StockService(InventoryRepository inventory) {
+    public StockService(InventoryRepository inventory, StockCounterSync counterSync) {
         this.inventory = inventory;
+        this.counterSync = counterSync;
     }
 
     @Transactional(readOnly = true)
@@ -53,6 +56,9 @@ public class StockService {
                 throw new NotFoundException("Inventory of product", productId);
             }
             open(productId, delta);
+            counterSync.loadAfterCommit(productId, delta);
+        } else {
+            counterSync.adjustAfterCommit(productId, delta);
         }
         log.info("Stock adjusted by {}: product={} delta={} reason={}", actor, productId, delta, reason);
         return get(productId);

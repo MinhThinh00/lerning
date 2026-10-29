@@ -2,7 +2,11 @@ package com.shop.inventory.infrastructure.persistence;
 
 import com.shop.inventory.domain.model.Inventory;
 import com.shop.inventory.domain.repository.InventoryRepository;
+import jakarta.persistence.LockModeType;
+import java.util.Collection;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,6 +19,15 @@ import org.springframework.data.repository.query.Param;
  * Mọi UPDATE đều tăng version → không phá strategy dùng @Version chạy xen kẽ.
  */
 public interface InventoryJpaRepository extends JpaRepository<Inventory, Long>, InventoryRepository {
+
+    /**
+     * MySQL bỏ qua hint jakarta.persistence.lock.timeout: thời gian chờ lock do innodb_lock_wait_timeout ở mức
+     * session quyết định (JDBC URL: sessionVariables=innodb_lock_wait_timeout=3). Hết giờ → PessimisticLockingFailureException.
+     */
+    @Override
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from Inventory i where i.productId in :ids and i.active = true order by i.productId")
+    List<Inventory> lockAllActive(@Param("ids") Collection<Long> productIds);
 
     @Override
     @Modifying(flushAutomatically = true)

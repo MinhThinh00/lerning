@@ -1,6 +1,6 @@
 package com.shop.inventory.application.reservation;
 
-/** 5 cơ chế chống oversell (docs/04 §1). Phase 5 mới có L1; L2–L5 làm ở Phase 8. */
+/** 5 cơ chế chống oversell (docs/04 §1). Cả 5 đều đúng khi chạy N replica; khác nhau ở throughput và tải lên DB. */
 public enum Strategy {
     /** Conditional UPDATE ... WHERE available >= qty. */
     L1,

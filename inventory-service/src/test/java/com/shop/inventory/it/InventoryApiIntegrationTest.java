@@ -72,12 +72,11 @@ class InventoryApiIntegrationTest extends InventoryIntegrationTest {
     }
 
     @Test
-    void notYetImplementedStrategyIs400() throws Exception {
-        mvc.perform(post("/api/inventory/reserve").param("strategy", "L5").with(service())
+    void unknownStrategyIs400() throws Exception {
+        mvc.perform(post("/api/inventory/reserve").param("strategy", "L9").with(service())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"orderId\":\"%s\",\"items\":[{\"productId\":1,\"quantity\":1}]}".formatted(UUID.randomUUID())))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value("STRATEGY_NOT_AVAILABLE"));
+            .andExpect(status().isBadRequest());
     }
 
     @Test

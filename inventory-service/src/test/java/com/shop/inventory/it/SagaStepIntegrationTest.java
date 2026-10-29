@@ -55,7 +55,7 @@ class SagaStepIntegrationTest extends InventoryIntegrationTest {
         EventEnvelope env = codec.decode(evt.value());
         assertThat(env.eventType()).isEqualTo("InventoryReserved");
         assertThat(env.source()).isEqualTo("inventory-service");
-        assertThat(env.payload().get("strategy").asString()).isEqualTo("L1");
+        assertThat(env.payload().get("strategy").asString()).isEqualTo("L5");   // strategy mặc định của luồng Kafka
         assertThat(env.payload().get("items")).hasSize(2);
     }
 
@@ -224,7 +224,7 @@ class SagaStepIntegrationTest extends InventoryIntegrationTest {
 
     /** Số lần reserve trả AlreadyHandled: dùng làm mốc "listener đã xử lý xong message trùng". */
     private double duplicates() {
-        Timer t = meters.find("inventory.reserve").tags("strategy", "L1", "outcome", "duplicate").timer();
+        Timer t = meters.find("inventory.reserve").tags("strategy", "L5", "outcome", "duplicate").timer();
         return t == null ? 0 : t.count();
     }
 }

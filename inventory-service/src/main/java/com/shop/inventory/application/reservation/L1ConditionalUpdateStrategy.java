@@ -34,6 +34,11 @@ public class L1ConditionalUpdateStrategy implements StockReservationStrategy {
 
     @Override
     public ReserveOutcome reserve(String orderId, List<Item> sortedItems) {
+        return reserveAs(orderId, sortedItems, Strategy.L1);
+    }
+
+    /** L5 dùng lại L1 làm bước quyết định cuối, nhưng reservation/event ghi strategy L5. */
+    ReserveOutcome reserveAs(String orderId, List<Item> sortedItems, Strategy recordedAs) {
         return tx.execute(status -> {
             for (Item it : sortedItems) {
                 if (inventory.decreaseIfAvailable(it.productId(), it.quantity()) == 0) {
@@ -41,7 +46,7 @@ public class L1ConditionalUpdateStrategy implements StockReservationStrategy {
                     return new Rejected(reasonFor(it.productId()), it.productId());
                 }
             }
-            recorder.reserved(orderId, sortedItems, Strategy.L1);
+            recorder.reserved(orderId, sortedItems, recordedAs);
             return new Reserved();
         });
     }

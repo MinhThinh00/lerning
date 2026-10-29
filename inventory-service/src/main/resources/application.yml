@@ -25,6 +25,15 @@ spring:
     change-log: classpath:db/changelog/db.changelog-master.yaml
     contexts: dev             # dev: seed tồn kho cho product 1..10. application-prod.yml đổi thành prod
 
+  # Redis (counter L5, lock L4). Sentinel: SPRING_DATA_REDIS_SENTINEL_MASTER + SPRING_DATA_REDIS_SENTINEL_NODES
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: ${REDIS_PASSWORD:}   # = REDIS_PASSWORD trong deploy/.env
+      timeout: 500ms                 # Redis chậm/chết → L5 rơi về DB nhanh, không treo request
+      connect-timeout: 500ms
+
   # Serializer, acks, ack-mode... đã có mặc định từ shop-common (docs/05 §6). Chỉ cần địa chỉ broker.
   kafka:
     bootstrap-servers: localhost:9092   # EXTERNAL listener của deploy/infra/kafka
@@ -38,8 +47,12 @@ spring:
 
 inventory:
   reserve:
-    # Strategy cho luồng Kafka (order.created). Phase 5 mới có L1; L2-L5 làm ở Phase 8.
-    default-strategy: ${INVENTORY_RESERVE_DEFAULT_STRATEGY:L1}
+    # Strategy cho luồng Kafka (order.created): L1..L5 (docs/04 §1). L5 cần Redis; Redis chết thì tự đi thẳng DB.
+    default-strategy: ${INVENTORY_RESERVE_DEFAULT_STRATEGY:L5}
+    l3-max-attempts: 20       # L3: đụng version quá số lần này → CONFLICT
+    l4-wait: 5s               # L4: chờ Redisson lock tối đa → LOCK_TIMEOUT
+  reconcile:
+    interval: 5m              # so counter Redis với DB; lệch 2 lượt liên tiếp thì sửa theo DB
 
 management:
   endpoints:

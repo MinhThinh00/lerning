@@ -1,6 +1,8 @@
 package com.shop.inventory.domain.repository;
 
 import com.shop.inventory.domain.model.Inventory;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -12,6 +14,15 @@ import java.util.Optional;
 public interface InventoryRepository {
 
     Optional<Inventory> findByProductId(long productId);
+
+    /** Đọc KHÔNG lock (L3, L4, nạp counter Redis). */
+    List<Inventory> findAllByProductIdIn(Collection<Long> productIds);
+
+    /** L2: SELECT ... FOR UPDATE các dòng active, theo thứ tự productId (mọi request lock cùng thứ tự → không deadlock). */
+    List<Inventory> lockAllActive(Collection<Long> productIds);
+
+    /** Warmup / reconcile counter Redis. */
+    List<Inventory> findAllByActiveTrue();
 
     /** L1: available -= qty, reserved += qty nếu đủ hàng. */
     int decreaseIfAvailable(long productId, int qty);

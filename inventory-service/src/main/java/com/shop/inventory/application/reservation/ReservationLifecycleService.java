@@ -30,11 +30,14 @@ public class ReservationLifecycleService {
     private final ReservationRepository reservations;
     private final InventoryRepository inventory;
     private final InboxGuard inbox;
+    private final StockCounterSync counterSync;
 
-    public ReservationLifecycleService(ReservationRepository reservations, InventoryRepository inventory, InboxGuard inbox) {
+    public ReservationLifecycleService(ReservationRepository reservations, InventoryRepository inventory, InboxGuard inbox,
+                                       StockCounterSync counterSync) {
         this.reservations = reservations;
         this.inventory = inventory;
         this.inbox = inbox;
+        this.counterSync = counterSync;
     }
 
     /** order.paid: RESERVED → COMMITTED; reserved -= q, sold += q. */
@@ -85,6 +88,7 @@ public class ReservationLifecycleService {
                 case RESERVED -> {
                     r.release();
                     requireOneRow(inventory.releaseReserved(r.getProductId(), r.getQuantity()), r);
+                    counterSync.adjustAfterCommit(r.getProductId(), r.getQuantity());   // hàng về available → counter Redis cũng vậy
                 }
                 case COMMITTED -> log.warn("order.cancelled for paid order {} (product {}): refund flow out of scope",
                     orderId, r.getProductId());

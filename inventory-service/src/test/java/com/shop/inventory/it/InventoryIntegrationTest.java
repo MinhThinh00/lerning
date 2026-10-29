@@ -15,12 +15,13 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.mysql.MySQLContainer;
 
 /**
- * Lớp cha cho integration test của inventory-service: app thật + MySQL + Kafka thật (cần Docker).
+ * Lớp cha cho integration test của inventory-service: app thật + MySQL + Kafka + Redis thật (cần Docker).
  * Mọi lớp con dùng chung 1 cấu hình → Spring chỉ dựng 1 context cho cả bộ test.
  *
  * Topic tạo trước giống job kafka-init (deploy/infra/kafka/topics.sh): code không tự tạo topic.
@@ -31,6 +32,8 @@ public abstract class InventoryIntegrationTest {
 
     protected static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.0.36").withDatabaseName("db_inventory");
     protected static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.9.1");
+    @SuppressWarnings("resource")
+    protected static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7.2-alpine").withExposedPorts(6379);
 
     private static final List<String> TOPICS = List.of(Topics.ORDER_CREATED, Topics.ORDER_PAID, Topics.ORDER_CANCELLED,
         Topics.INVENTORY_RESERVED, Topics.INVENTORY_FAILED);
@@ -39,7 +42,7 @@ public abstract class InventoryIntegrationTest {
     private static final AtomicLong NEXT_PRODUCT_ID = new AtomicLong(System.currentTimeMillis() % 1_000_000 * 1000);
 
     static {
-        Startables.deepStart(MYSQL, KAFKA).join();
+        Startables.deepStart(MYSQL, KAFKA, REDIS).join();
         TOPICS.forEach(t -> KafkaTestSupport.createTopics(KAFKA.getBootstrapServers(), 3, t, Topics.dlt(t)));
     }
 
@@ -52,6 +55,9 @@ public abstract class InventoryIntegrationTest {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         registry.add("spring.kafka.consumer.properties.metadata.max.age.ms", () -> "1000");
         registry.add("shop.outbox.poll-interval-ms", () -> "100");
+        registry.add("spring.data.redis.host", REDIS::getHost);
+        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+        registry.add("spring.data.redis.timeout", () -> "2s");   // 200 thread cùng lúc trên máy dev
     }
 
     @MockitoBean

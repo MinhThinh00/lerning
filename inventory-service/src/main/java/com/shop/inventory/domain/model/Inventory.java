@@ -19,7 +19,10 @@ import java.time.Instant;
  * </pre>
  * Luồng nóng (reserve/commit/release) KHÔNG đọc entity rồi ghi lại mà dùng UPDATE nguyên tử có điều kiện
  * (InventoryRepository), để nhiều replica cùng ghi 1 dòng không làm mất cập nhật của nhau.
- * Các UPDATE đó đều tăng version, nên strategy dùng @Version (L3, Phase 8) chạy xen kẽ vẫn đúng.
+ * Các UPDATE đó đều tăng version, nên strategy dùng @Version (L3, L4) chạy xen kẽ vẫn đúng.
+ *
+ * L2/L3/L4 thì đọc entity rồi gọi {@link #reserve}: đúng được là nhờ lock (L2: FOR UPDATE) hoặc @Version (L3, L4:
+ * flush thành UPDATE ... WHERE version = ?, version đã đổi → ObjectOptimisticLockingFailureException).
  */
 @Entity
 @Table(name = "inventory")
@@ -70,6 +73,19 @@ public class Inventory {
         inv.productId = productId;
         inv.available = initialAvailable;
         return inv;
+    }
+
+    public boolean canReserve(int qty) {
+        return active && available >= qty;
+    }
+
+    /** available -= qty, reserved += qty. Người gọi phải giữ lock (L2) hoặc dựa vào @Version (L3, L4). */
+    public void reserve(int qty) {
+        if (qty <= 0 || !canReserve(qty)) {
+            throw new IllegalStateException("Cannot reserve " + qty + " of product " + productId + " (available " + available + ")");
+        }
+        available -= qty;
+        reserved += qty;
     }
 
     @PrePersist

@@ -3,6 +3,7 @@ package com.shop.inventory.application.reservation;
 import com.shop.common.web.error.BusinessException;
 import com.shop.inventory.application.reservation.ReserveOutcome.AlreadyHandled;
 import com.shop.inventory.application.reservation.ReserveOutcome.Rejected;
+import com.shop.inventory.application.reservation.ReserveOutcome.Reserved;
 import com.shop.inventory.domain.repository.ReservationRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -25,7 +26,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *  2. Sắp items theo productId                               → mọi request lock theo cùng thứ tự, chống deadlock
  *  3. strategy.reserve: thành công → trừ kho + reservation RESERVED + outbox inventory.reserved (1 transaction)
  *                       thất bại   → transaction MỚI: reservation FAILED + outbox inventory.failed
- *  4. Metric inventory.reserve{strategy, outcome}
+ *  4. Giữ được bằng L1–L4 → trừ counter Redis (L5 đã tự trừ ở cổng) để counter bám theo DB
+ *  5. Metric inventory.reserve{strategy, outcome}
  * </pre>
  * Hai consumer cùng vượt qua bước 1 (redelivery song song) → unique (order_id, product_id) làm transaction
  * thứ hai vỡ → bắt lại, trả AlreadyHandled.
@@ -39,14 +41,17 @@ public class ReservationService {
     private final ReservationRepository reservations;
     private final ReservationRecorder recorder;
     private final TransactionTemplate tx;
+    private final StockCounter counter;
     private final MeterRegistry meters;
 
     public ReservationService(List<StockReservationStrategy> strategies, ReservationRepository reservations,
-                              ReservationRecorder recorder, TransactionTemplate tx, MeterRegistry meters) {
+                              ReservationRecorder recorder, TransactionTemplate tx, StockCounter counter,
+                              MeterRegistry meters) {
         strategies.forEach(s -> this.strategies.put(s.id(), s));
         this.reservations = reservations;
         this.recorder = recorder;
         this.tx = tx;
+        this.counter = counter;
         this.meters = meters;
     }
 
@@ -83,6 +88,9 @@ public class ReservationService {
         }
         try {
             ReserveOutcome outcome = strategy.reserve(orderId, sorted);
+            if (outcome instanceof Reserved && strategy.id() != Strategy.L5) {
+                sorted.forEach(it -> counter.adjust(it.productId(), -it.quantity()));   // đã commit; best-effort
+            }
             if (outcome instanceof Rejected rejected) {
                 tx.executeWithoutResult(s -> recorder.failed(orderId, sorted, rejected, strategy.id()));
                 // debug: lúc benchmark có hàng nghìn lần từ chối mỗi giây; số liệu đã có ở metric inventory.reserve
