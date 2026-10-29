@@ -162,3 +162,4 @@ Chi tiết topic, envelope, idempotency: [05-MESSAGING](./05-MESSAGING.md).
 | [07-ORDER-SERVICE](./07-ORDER-SERVICE.md) | order-service, state machine, timeout; payment & notification |
 | [08-OBSERVABILITY](./08-OBSERVABILITY.md) | Logs, metrics, traces, dashboard, alert |
 | [09-IMPLEMENTATION-PLAN](./09-IMPLEMENTATION-PLAN.md) | Kế hoạch theo phase, Definition of Done |
+| [10-LEARNING-FROM-REFERENCES](./10-LEARNING-FROM-REFERENCES.md) | Pattern & bug từ 2 dự án tham khảo (xxxx, selex), áp vào demo theo phase, checklist review |
